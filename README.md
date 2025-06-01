@@ -36,7 +36,7 @@ Take for example the 400-yard hole in the image above. The PGA Tour average for 
   <li><em>Calculation:</em> 1.34 - 1 = <strong>+0.34 strokes gained</strong></li>
 </ul>
 
-In aggregate, you <strong>lost -0.02 strokes</strong> on the hole (4 - 3.98). Each shot had its own value — some positive, some negative. Over time, this type of analysis can surface trends and uncover the true strengths and weaknesses in your game.<br>
+In aggregate, you <strong>lost -0.02 strokes</strong> on the hole (4 - 3.98), using PGA Tour averages. Each shot had its own value — some positive, some negative. Over time, this type of analysis can surface trends and uncover the true strengths and weaknesses in your game.<br>
 
 ## Using the App
 Tracking Strokes Gained with the app is simple - all you need to log is the <strong>starting position of each shot</strong> you took, and whether it went in the hole. Use <strong>Enter</strong> or <strong>Tab</strong> to submit shots. <br>
