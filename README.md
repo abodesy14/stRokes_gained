@@ -8,7 +8,7 @@ Welcome to the stRokes_gained repo - a free tool that lets you analyze your game
 ## Why Use Strokes Gained?<br>
 "Strokes Gained" is a modern approach to evaluating golfer performance. Rather than tracking traditional stats like fairways hit, greens in regulation, or total putts, strokes gained puts each shot in context by comparing it to the average outcome for golfers of specific handicap levels.
 
-These averages are derived from millions of shots across different lies/distance/handicap combinations, allowing us to estimate the expected number of strokes from any position on the course. This makes it easier to identify where you're gaining or losing strokes, and where to focus your practice.
+These averages are derived from millions of shots across different lie/distance/handicap combinations, allowing us to estimate the expected number of strokes from any position on the course. This makes it easier to identify where you're gaining or losing strokes, and where to focus your practice.
 
 ## Real-World Example:<br>
 
@@ -16,7 +16,7 @@ These averages are derived from millions of shots across different lies/distance
 
 Take for example the 400-yard hole in the image above. The PGA Tour average for a hole of this length is <strong>3.98 strokes</strong>. Imagine you're a PGA Tour pro for a second, playing this hole:
 
-<p><strong>Shot 1</strong>: You tee off from 400 yards, ending up at 100 yards in the fairway. A great shot, any way you slice it. The expected strokes for a PGA Tour pro from 100 yards in the fairway is <strong>2.78</strong>.</p>
+<p><strong>Shot 1</strong>: You tee off from 400 yards, ending up at 100 yards in the fairway. The expected strokes for a PGA Tour pro from 100 yards in the fairway is <strong>2.78</strong>.</p>
 <ul>
   <li><em>Calculation:</em> (3.98 - 1) - 2.78 = <strong>+0.20 strokes gained</strong></li>
 </ul>
