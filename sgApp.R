@@ -138,6 +138,7 @@ server <- function(input, output, session) {
   # holds user input table. render 36 shots upon app open
   initialize_table <- reactiveVal(data.frame(
     shot_code_yds = rep(NA_character_, 36),
+    par = rep(NA_character_, 36),
     club = rep(NA_character_, 36),
     in_hole = rep(NA_character_, 36),
     strokes_gained = rep(NA_real_, 36),
@@ -150,6 +151,7 @@ server <- function(input, output, session) {
     
     new_rows <- data.frame(
       shot_code_yds = rep(NA_character_, n),
+      par = rep(NA_character_, n),
       club = rep(NA_character_, n),
       in_hole = rep(NA_character_, n),
       strokes_gained = rep(NA_real_, n),
@@ -182,16 +184,17 @@ server <- function(input, output, session) {
         baseline = .data[[baseline_col]],
         is_holed = !is.na(in_hole) & in_hole != "",
         strokes_gained = round(ifelse(is_holed, baseline - 1, baseline - lead(baseline, order_by = row_number()) - 1), 2)) %>%
-      select(shot_code_yds, club, in_hole, strokes_gained, high_level_desc)
+      select(shot_code_yds, par, club, in_hole, strokes_gained, high_level_desc)
   })
 
   output$sg_table <- renderDT({
     joined_data() %>%
-      select(shot_code_yds, club, in_hole, strokes_gained) %>%
+      select(shot_code_yds, par, club, in_hole, strokes_gained) %>%
       datatable(
-      editable = list(target = "cell", disable = list(columns = c(4:ncol(joined_data())))),
+      editable = list(target = "cell", disable = list(columns = c(5:ncol(joined_data())))),
       colnames = c(
         'Shot Start' = 'shot_code_yds',
+        'Par' = 'par',
         'Club' = 'club',
         'Ball in Hole' = 'in_hole',
         'Strokes Gained' = 'strokes_gained'
@@ -199,7 +202,7 @@ server <- function(input, output, session) {
       options = list(
         paging = FALSE,
         dom = 't',
-        columnDefs = list(list(className = 'dt-center', targets = 1:4))),
+        columnDefs = list(list(className = 'dt-center', targets = 1:5))),
       class = 'cell-border'
     ) %>%
     formatStyle(
