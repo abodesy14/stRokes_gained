@@ -15,7 +15,7 @@
 }
 
 # expected strokes dataset
-xStrokes <- read.csv("data/expected_strokes_dataset.csv") %>%
+xStrokes <- read.csv("data/expected_strokes/expected_strokes_dataset.csv") %>%
   select(-c(hdcp_4_exp:hdcp_20_exp))
 
 # impute any gaps in data (thousands of distance/lie/handicap combinations)
@@ -138,6 +138,7 @@ server <- function(input, output, session) {
   # holds user input table. render 36 shots upon app open
   initialize_table <- reactiveVal(data.frame(
     shot_code_yds = rep(NA_character_, 36),
+    club = rep(NA_character_, 36),
     in_hole = rep(NA_character_, 36),
     strokes_gained = rep(NA_real_, 36),
     stringsAsFactors = FALSE
@@ -149,6 +150,7 @@ server <- function(input, output, session) {
     
     new_rows <- data.frame(
       shot_code_yds = rep(NA_character_, n),
+      club = rep(NA_character_, n),
       in_hole = rep(NA_character_, n),
       strokes_gained = rep(NA_real_, n),
       stringsAsFactors = FALSE
@@ -180,23 +182,24 @@ server <- function(input, output, session) {
         baseline = .data[[baseline_col]],
         is_holed = !is.na(in_hole) & in_hole != "",
         strokes_gained = round(ifelse(is_holed, baseline - 1, baseline - lead(baseline, order_by = row_number()) - 1), 2)) %>%
-      select(shot_code_yds, in_hole, strokes_gained, high_level_desc)
+      select(shot_code_yds, club, in_hole, strokes_gained, high_level_desc)
   })
 
   output$sg_table <- renderDT({
     joined_data() %>%
-      select(shot_code_yds, in_hole, strokes_gained) %>%
+      select(shot_code_yds, club, in_hole, strokes_gained) %>%
       datatable(
-      editable = list(target = "cell", disable = list(columns = c(3:ncol(joined_data())))),
+      editable = list(target = "cell", disable = list(columns = c(4:ncol(joined_data())))),
       colnames = c(
         'Shot Start' = 'shot_code_yds',
+        'Club' = 'club',
         'Ball in Hole' = 'in_hole',
         'Strokes Gained' = 'strokes_gained'
       ),
       options = list(
         paging = FALSE,
         dom = 't',
-        columnDefs = list(list(className = 'dt-center', targets = 1:3))),
+        columnDefs = list(list(className = 'dt-center', targets = 1:4))),
       class = 'cell-border'
     ) %>%
     formatStyle(
