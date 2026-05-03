@@ -1,4 +1,5 @@
-data/expected_strokes_dataset.csv
-data/shot_tracking_file.xlsx
+data/expected_strokes
+data/shot_tracking
+data/proximity
 .DS_Store
 .Rhistory
