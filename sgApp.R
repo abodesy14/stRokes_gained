@@ -133,9 +133,9 @@ ui <- fluidPage(
 
 
 # server
+# server
 server <- function(input, output, session) {
   
-  # holds user input table. render 36 shots upon app open
   initialize_table <- reactiveVal(data.frame(
     shot_code_yds = rep(NA_character_, 36),
     par = rep(NA_character_, 36),
@@ -145,10 +145,8 @@ server <- function(input, output, session) {
     stringsAsFactors = FALSE
   ))
   
-  # add rows/"shots" when button is clicked
   observeEvent(input$add_rows, {
     n <- input$num_rows
-    
     new_rows <- data.frame(
       shot_code_yds = rep(NA_character_, n),
       par = rep(NA_character_, n),
@@ -157,13 +155,9 @@ server <- function(input, output, session) {
       strokes_gained = rep(NA_real_, n),
       stringsAsFactors = FALSE
     )
-    
-    updated_table <- rbind(initialize_table(), new_rows)
-    initialize_table(updated_table)
+    initialize_table(rbind(initialize_table(), new_rows))
   })
   
-
-  # get shots recorded by user in table
   observeEvent(input$sg_table_cell_edit, {
     info <- input$sg_table_cell_edit
     edited_table <- initialize_table()
@@ -171,7 +165,6 @@ server <- function(input, output, session) {
     initialize_table(edited_table)
   })
   
-  # join user inputted shots to expected strokes df
   joined_data <- reactive({
     user_df <- initialize_table()
     if (nrow(user_df) == 0) return(user_df)
@@ -183,37 +176,56 @@ server <- function(input, output, session) {
       mutate(
         baseline = .data[[baseline_col]],
         is_holed = !is.na(in_hole) & in_hole != "",
-        strokes_gained = round(ifelse(is_holed, baseline - 1, baseline - lead(baseline, order_by = row_number()) - 1), 2)) %>%
+        strokes_gained = round(ifelse(is_holed, baseline - 1, baseline - lead(baseline, order_by = row_number()) - 1), 2)
+      ) %>%
       select(shot_code_yds, par, club, in_hole, strokes_gained, high_level_desc)
   })
-
+  
+  # render once only — never re-renders after this
+  table_rendered <- reactiveVal(FALSE)
+  
   output$sg_table <- renderDT({
+    table_rendered(TRUE)
+    # read joined_data once on init, isolate prevents re-render on cell edits
+    # but renderDT still fires when add_rows button is clicked via initialize_table
     joined_data() %>%
       select(shot_code_yds, par, club, in_hole, strokes_gained) %>%
       datatable(
-      editable = list(target = "cell", disable = list(columns = c(5:ncol(joined_data())))),
-      colnames = c(
-        'Shot Start' = 'shot_code_yds',
-        'Par' = 'par',
-        'Club' = 'club',
-        'Ball in Hole' = 'in_hole',
-        'Strokes Gained' = 'strokes_gained'
-      ),
-      options = list(
-        paging = FALSE,
-        dom = 't',
-        columnDefs = list(list(className = 'dt-center', targets = 1:5))),
-      class = 'cell-border'
-    ) %>%
-    formatStyle(
-      'Strokes Gained',
-      # hulk color palette for strokes gained
-      backgroundColor = styleInterval(c(-Inf, -0.5, -0.01, 0, 0.5, Inf),
-                                      c("#762a83", "#af8dc3", "#e7d4e8", '#fffff', "#d9f0d3", "#7fbf7b", "#1b7837"))
+        editable = list(target = "cell", disable = list(columns = c(5:6))),
+        colnames = c(
+          'Shot Start' = 'shot_code_yds',
+          'Par' = 'par',
+          'Club' = 'club',
+          'Ball in Hole' = 'in_hole',
+          'Strokes Gained' = 'strokes_gained'
+        ),
+        options = list(
+          paging = FALSE,
+          dom = 't',
+          columnDefs = list(list(className = 'dt-center', targets = 1:5))
+        ),
+        class = 'cell-border'
+      ) %>%
+      formatStyle(
+        'Strokes Gained',
+        backgroundColor = styleInterval(c(-Inf, -0.5, -0.01, 0, 0.5, Inf),
+                                        c("#762a83", "#af8dc3", "#e7d4e8", '#fffff', "#d9f0d3", "#7fbf7b", "#1b7837"))
+      )
+  })
+  
+  proxy <- dataTableProxy("sg_table")
+  
+  # only fires on cell edits, not row additions
+  observeEvent(input$sg_table_cell_edit, {
+    req(table_rendered())
+    replaceData(
+      proxy,
+      joined_data() %>% select(shot_code_yds, par, club, in_hole, strokes_gained),
+      resetPaging = FALSE,
+      rownames = FALSE
     )
   })
   
-  # kpi cards for each SG category
   output$sg_kpi_boxes <- renderUI({
     kpi_data <- joined_data()
     if (nrow(kpi_data) == 0) return(NULL)
@@ -228,27 +240,16 @@ server <- function(input, output, session) {
     kpi_cards <- lapply(1:nrow(kpi_data), function(i) {
       desc <- kpi_data$high_level_desc[i]
       value <- kpi_data$total_sg[i]
-      
-      infoBox(
-        title = desc,
-        value = value,
-        icon = icon("golf-ball-tee"),
-        width = 2
-      )
+      infoBox(title = desc, value = value, icon = icon("golf-ball-tee"), width = 2)
     })
     
     fluidRow(kpi_cards)
   })
   
-  # write sg data to csv
   output$download_csv <- downloadHandler(
-    filename = function() {
-      paste0("strokes_gained_data_", Sys.Date(), ".csv")
-    },
-    content = function(file) {
-      write.csv(joined_data(), file, row.names = FALSE)
-    }
+    filename = function() paste0("strokes_gained_data_", Sys.Date(), ".csv"),
+    content = function(file) write.csv(joined_data(), file, row.names = FALSE)
   )
 }
-  
+
 shinyApp(ui, server)
