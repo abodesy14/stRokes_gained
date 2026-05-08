@@ -1,9 +1,9 @@
 # stRokes_gained
 
 ## Calculate Your Own Strokes Gained
-Welcome to the stRokes_gained repo - a free tool that lets you analyze your game like the pros do.<br>
+Welcome to the stRokes_gained repo, a free tool that lets you analyze your game like the pros do.<br>
 
- Try the Shiny app to see how your game stacks up: https://abodesy14.shinyapps.io/stRokes_gained/
+Try the Shiny app to find the strengths and weaknesses of your own game: https://abodesy14.shinyapps.io/stRokes_gained/
 
 ## Why Use Strokes Gained?<br>
 "Strokes Gained" is a modern approach to evaluating golfer performance. Rather than tracking traditional stats like fairways hit, greens in regulation, or total putts, strokes gained puts each shot in context by comparing it to the average outcome for golfers of specific handicap levels.
@@ -36,10 +36,10 @@ Take for example the 400-yard hole in the image above. The PGA Tour average for 
   <li><em>Calculation:</em> 1.34 - 1 = <strong>+0.34 strokes gained</strong></li>
 </ul>
 
-In aggregate, you <strong>lost -0.02 strokes</strong> on the hole (4 - 3.98), using PGA Tour averages. Each shot had its own value — some positive, some negative. Over time, this type of analysis can surface trends and uncover the true strengths and weaknesses in your game.<br>
+In aggregate, you <strong>lost -0.02 strokes</strong> on the hole (4 - 3.98), using PGA Tour averages. Each shot had its own value, some positive, some negative. Over time, this type of analysis can surface trends and uncover the true strengths and weaknesses in your game.<br>
 
 ## Using the App
-Tracking Strokes Gained with the app is simple - all you need to log is the <strong>starting position of each shot</strong> you took, and whether it went in the hole. Use <strong>Enter</strong> or <strong>Tab</strong> to submit shots. <br>
+Tracking Strokes Gained with the app is simple. All you need to log is the <strong>starting position of each shot</strong> you took, and whether it went in the hole. Use <strong>Enter</strong> or <strong>Tab</strong> to submit shots. <br>
 
 Think of the table like an Excel spreadsheet:<br>
 - In cell A1, enter the starting location of your first shot. For example, type: <strong>400t</strong> (indicating you are on the tee, 400 yards from the pin).
@@ -55,7 +55,7 @@ As you log your shots, your Strokes Gained will be calculated in the rightmost c
 https://github.com/user-attachments/assets/4583ee50-6086-4e7c-ba9e-72202a37954a 
 <br>
 
-The app defaults to loading in 36 shots - use the "Add Shots" button to add additional shots as needed. Your results can be exported to csv with the "Download" button. Keep in mind that refreshing the page will likely cause you to lose anything you've logged. <br><br>
+The app defaults to loading in 36 shots. Use the "Add Shots" button to add additional shots as needed. Your results can be exported to csv with the "Download" button. Keep in mind that refreshing the page will likely cause you to lose anything you've logged. <br><br>
 
 ## Future Roadmap
 - Allow for user csv upload
