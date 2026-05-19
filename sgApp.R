@@ -138,6 +138,7 @@ server <- function(input, output, session) {
   
   initialize_table <- reactiveVal(data.frame(
     shot_code_yds = rep(NA_character_, 36),
+    hole = rep(NA_character_, 36),
     par = rep(NA_character_, 36),
     club = rep(NA_character_, 36),
     in_hole = rep(NA_character_, 36),
@@ -149,6 +150,7 @@ server <- function(input, output, session) {
     n <- input$num_rows
     new_rows <- data.frame(
       shot_code_yds = rep(NA_character_, n),
+      hole = rep(NA_character_, n),
       par = rep(NA_character_, n),
       club = rep(NA_character_, n),
       in_hole = rep(NA_character_, n),
@@ -178,7 +180,7 @@ server <- function(input, output, session) {
         is_holed = !is.na(in_hole) & in_hole != "",
         strokes_gained = round(ifelse(is_holed, baseline - 1, baseline - lead(baseline, order_by = row_number()) - 1), 2)
       ) %>%
-      select(shot_code_yds, par, club, in_hole, strokes_gained, high_level_desc)
+      select(shot_code_yds, hole, par, club, in_hole, strokes_gained, high_level_desc)
   })
   
   # render once only — never re-renders after this
@@ -189,11 +191,12 @@ server <- function(input, output, session) {
     # read joined_data once on init, isolate prevents re-render on cell edits
     # but renderDT still fires when add_rows button is clicked via initialize_table
     joined_data() %>%
-      select(shot_code_yds, par, club, in_hole, strokes_gained) %>%
+      select(shot_code_yds, hole, par, club, in_hole, strokes_gained) %>%
       datatable(
-        editable = list(target = "cell", disable = list(columns = c(5:6))),
+        editable = list(target = "cell", disable = list(columns = c(6))),
         colnames = c(
           'Shot Start' = 'shot_code_yds',
+          'Hole' = 'hole',
           'Par' = 'par',
           'Club' = 'club',
           'Ball in Hole' = 'in_hole',
@@ -202,14 +205,20 @@ server <- function(input, output, session) {
         options = list(
           paging = FALSE,
           dom = 't',
-          columnDefs = list(list(className = 'dt-center', targets = 1:5))
+          columnDefs = list(list(className = 'dt-center', targets = 1:6))
         ),
         class = 'cell-border'
       ) %>%
       formatStyle(
         'Strokes Gained',
-        backgroundColor = styleInterval(c(-Inf, -0.5, -0.01, 0, 0.5, Inf),
-                                        c("#762a83", "#af8dc3", "#e7d4e8", '#fffff', "#d9f0d3", "#7fbf7b", "#1b7837"))
+        backgroundColor = styleInterval(
+          c(-1.0, -0.5, -0.2, -0.001, 0.001, 0.2, 0.5, 1.0),
+          c("#3C3489", "#7F77DD", "#AFA9EC", "#E1D8F5", "#ffffff", "#9FE1CB", "#5DCAA5", "#1D9E75", "#085041")
+        ),
+        color = styleInterval(
+          c(-0.5, -0.2, 0.2, 0.5),
+          c("#fff", "#3C3489", "#1a1a1a", "#1a1a1a", "#fff")
+        )
       )
   })
   
@@ -220,7 +229,7 @@ server <- function(input, output, session) {
     req(table_rendered())
     replaceData(
       proxy,
-      joined_data() %>% select(shot_code_yds, par, club, in_hole, strokes_gained),
+      joined_data() %>% select(shot_code_yds, hole, par, club, in_hole, strokes_gained),
       resetPaging = FALSE,
       rownames = FALSE
     )
