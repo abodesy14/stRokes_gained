@@ -1,6 +1,15 @@
 # checks
 # each hole starts with "t" in it
 
+# KPIs to add
+# proximity
+# birdies per 18
+# FIR, GIR streaks 
+# most played course
+# best hole aggregate score of all times played it
+# career +/- to par
+
+
 # load libraries
 {
   library(shiny)
@@ -9,18 +18,17 @@
   library(shinydashboard)
   library(DT)
   library(tidyverse)
+  library(plotly)
   library(glue)
   library(gt)
   library(gtExtras)
   library(readxl)
   library(zoo)
   library(tidyr)
+  library(ggthemes)
 }
 
-#### DATA TESTS ####
-# bad data will flow into this df
-hole_starts_with_tee_shot_code <- sg_composite %>%
-  filter(stroke == 1 & !grepl("t", start))
+
 
 ####################
 
@@ -158,11 +166,11 @@ sg_composite <- left_join(sg_composite, dim_sg_cat, by = c("start" = "shot_code_
 sg_composite <- sg_composite %>% 
   mutate(pga_sg = ifelse(!is.na(in_hole), pga_exp - 1, (pga_exp-lead(pga_exp)-1))) %>% 
   mutate(scratch_sg = ifelse(!is.na(in_hole), scratch_exp - 1, (scratch_exp-lead(scratch_exp)-1))) %>%
-  mutate(avg_80_sg = ifelse(!is.na(in_hole), avg_80_exp - 1, (pga_exp-lead(avg_80_exp)-1))) %>% 
-  mutate(avg_85_sg = ifelse(!is.na(in_hole), avg_85_exp - 1, (pga_exp-lead(avg_85_exp)-1))) %>% 
-  mutate(avg_90_sg = ifelse(!is.na(in_hole), avg_90_exp - 1, (pga_exp-lead(avg_90_exp)-1))) %>% 
-  mutate(avg_95_sg = ifelse(!is.na(in_hole), avg_95_exp - 1, (pga_exp-lead(avg_95_exp)-1))) %>% 
-  mutate(avg_100_sg = ifelse(!is.na(in_hole), avg_100_exp - 1, (pga_exp-lead(avg_100_exp)-1))) %>% 
+  mutate(avg_80_sg = ifelse(!is.na(in_hole), avg_80_exp - 1, (avg_80_exp-lead(avg_80_exp)-1))) %>% 
+  mutate(avg_85_sg = ifelse(!is.na(in_hole), avg_85_exp - 1, (avg_85_exp-lead(avg_85_exp)-1))) %>% 
+  mutate(avg_90_sg = ifelse(!is.na(in_hole), avg_90_exp - 1, (avg_90_exp-lead(avg_90_exp)-1))) %>% 
+  mutate(avg_95_sg = ifelse(!is.na(in_hole), avg_95_exp - 1, (avg_95_exp-lead(avg_95_exp)-1))) %>% 
+  mutate(avg_100_sg = ifelse(!is.na(in_hole), avg_100_exp - 1, (avg_100_exp-lead(avg_100_exp)-1))) %>% 
   mutate(club = if_else(club == "Driver", "d", club), club = tolower(club)) %>%
   mutate(drive_distance = ifelse(club == "d", as.numeric(start_distance) - as.numeric(finish_distance), NA_real_))
 
@@ -175,7 +183,10 @@ options(scipen = 999)
 ### END READ IN SHOT DATA + DATA CLEANING ###
 
 
-
+#### DATA TESTS ####
+# bad data will flow into this df
+hole_starts_with_tee_shot_code <- sg_composite %>%
+  filter(stroke == 1 & !grepl("t", start))
 
 
 # datagolf esque chart
@@ -185,15 +196,19 @@ score_to_par <- sg_composite %>%
   group_by(round_id) %>%
   summarise(score_to_par = sum(score_to_par))
 
-
 sg_summarised <- sg_composite %>%
   arrange(date) %>%
   mutate(high_level_desc = coalesce(high_level_desc, "Unknown")) %>%
   bind_rows(sg_composite %>% mutate(high_level_desc = "TOTAL")) %>%
   group_by(round_id, high_level_desc) %>%
   summarise(
-    pga_sg = sum(pga_sg),
-    scratch_sg = sum(scratch_sg),
+    pga_sg     = sum(pga_sg,     na.rm = TRUE),
+    scratch_sg = sum(scratch_sg, na.rm = TRUE),
+    avg_80_sg  = sum(avg_80_sg,  na.rm = TRUE),
+    avg_85_sg  = sum(avg_85_sg,  na.rm = TRUE),
+    avg_90_sg  = sum(avg_90_sg,  na.rm = TRUE),
+    avg_95_sg  = sum(avg_95_sg,  na.rm = TRUE),
+    avg_100_sg = sum(avg_100_sg, na.rm = TRUE),
     strokes = n(),
     holes = sum(hole != lag(hole), na.rm = TRUE) + 1,
     date = first(date),
@@ -208,11 +223,6 @@ sg_summarised <- sg_composite %>%
     course_name = sub(" \\| .*", "", round_id),
     course_name = gsub("_", " ", course_name),
     course_name = tools::toTitleCase(course_name),
-    bar_color = case_when(
-      high_level_desc == "TOTAL" & !holes %in% c(9, 18) ~ "rgba(100, 195, 220, 0.4)",
-      scratch_sg < 0 ~ "rgba(224, 112, 112, 0.4)",
-      TRUE           ~ "rgba(100, 180, 160, 0.4)"
-    ),
     score_label = case_when(
       score_to_par == 0 ~ "E",
       score_to_par > 0  ~ paste0("+", score_to_par),
@@ -239,6 +249,55 @@ ui <- fluidPage(
       }
     });
   ")),
+  
+  tags$style(HTML("
+
+/* the whole card */
+.info-box {
+  min-height: 50px;      /* how tall the card is */
+  margin-bottom: 10px;   /* space between rows of cards */
+  border: 1px solid #e0e0e0;  /* border: thickness, style, color */
+  border-radius: 8px;    /* rounds the corners. 0 = sharp, higher = more rounded */
+  box-shadow: none;      /* removes the default shadow shinydashboard adds */
+}
+
+/* the colored icon square on the left */
+.info-box-icon {
+  height: 50px;          /* should match min-height above */
+  line-height: 50px;     /* vertically centers the icon. should match height */
+  width: 70px;           /* how wide the icon area is */
+  font-size: 28px;       /* size of the icon itself */
+}
+
+/* the text area on the right of the icon */
+.info-box-content {
+
+  /* added: stack label + value vertically */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+
+  padding-top: 4px;      /* space above the text */
+  padding-bottom: 4px;   /* space below the text */
+}
+
+/* the big number in the middle */
+.info-box-number {
+  font-size: 22px;
+  line-height: 1.1;      /* added */
+}
+
+/* the title text at the top */
+.info-box-text {
+  font-size: 13px;
+  line-height: 1.1;      /* added */
+  margin-bottom: 2px;    /* added */
+
+  /* added: allows long labels to wrap */
+  white-space: normal;
+}
+
+")),
   
   
   # global handicap selection
@@ -437,6 +496,62 @@ ui <- fluidPage(
     tabPanel(
       "Cumulative",
       plotlyOutput("cumulative_sg")
+    ),
+    
+    tabPanel(
+      "SG by Category",
+      br(),
+      plotOutput("sg_by_category", height = "500px")
+    ),
+    
+    tabPanel(
+      "Best and Worst Shots",
+      br(),
+      fluidRow(
+        column(
+          width = 8,
+          selectInput(
+            "top_bottom_round",
+            "Select Round(s)",
+            choices = sg_composite %>%
+              distinct(round_id, date) %>%
+              arrange(desc(date)) %>%
+              pull(round_id),
+            multiple = TRUE,
+            selected = sg_composite %>%
+              distinct(round_id, date) %>%
+              arrange(desc(date)) %>%
+              slice(1) %>%
+              pull(round_id)
+          )
+        ),
+        column(
+          width = 2,
+          numericInput(
+            "top_bottom_n",
+            "Top / Bottom N:",
+            value = 5,
+            min = 1,
+            max = 20
+          )
+        )
+      ),
+      gt_output("best_and_worst_shots")
+    ),
+    tabPanel(
+      "KPIs",
+      br(),
+      uiOutput("kpi_cards")
+      ),
+    
+    tabPanel(
+      "Data Dictionary",
+      br(),
+      gt_output("data_dict")
+    ),
+    
+    tabPanel(
+      "FAQ"
     )
   )
 )
@@ -444,20 +559,37 @@ ui <- fluidPage(
 # server
 server <- function(input, output, session) {
   
+  sg_col <- reactive({
+    switch(
+      input$handicap_baseline,
+      "pga_exp"     = "pga_sg",
+      "scratch_exp" = "scratch_sg",
+      "avg_80_exp"  = "avg_80_sg",
+      "avg_85_exp"  = "avg_85_sg",
+      "avg_90_exp"  = "avg_90_sg",
+      "avg_95_exp"  = "avg_95_sg",
+      "avg_100_exp" = "avg_100_sg"
+    )
+  })
+  
+  sg_col_label <- reactive({
+    switch(
+      input$handicap_baseline,
+      "pga_exp"     = "PGA",
+      "scratch_exp" = "Scratch",
+      "avg_80_exp"  = "80 Avg",
+      "avg_85_exp"  = "85 Avg",
+      "avg_90_exp"  = "90 Avg",
+      "avg_95_exp"  = "95 Avg",
+      "avg_100_exp" = "100 Avg"
+    )
+  })
+  
   
   # shared reactive used by scorecards and sg_breakout
   hole_level_data <- reactive({
     
-    selected_handicap <- switch(
-      input$handicap_baseline,
-      "pga_exp" = "pga_sg",
-      "scratch_exp" = "scratch_sg",
-      "avg_80_exp" = "avg_80_sg",
-      "avg_85_exp" = "avg_85_sg",
-      "avg_90_exp" = "avg_90_sg",
-      "avg_95_exp" = "avg_95_sg",
-      "avg_100_exp" = "avg_100_sg"
-    )
+    selected_handicap <- sg_col()
     
     sg_composite %>%
       mutate(selected_handicap = .data[[selected_handicap]]) %>%
@@ -466,11 +598,15 @@ server <- function(input, output, session) {
       mutate(fir = ifelse(par >= 4 & stroke == 1 & finish_surface == 'Fairway', 1,
                           ifelse(par == 3, NA, 0))) %>%
       mutate(feet_of_putts_made = ifelse(start_surface == "Green" & !is.na(in_hole), start_distance, 0)) %>%
+      mutate(good_shot = ifelse(selected_handicap >= 0.5, 1, 0)) %>%
+      mutate(bad_shot = ifelse(selected_handicap <= -0.5, 1, 0)) %>%
       group_by(round_id, date, hole_index, par) %>%
       summarise(
         score = max(stroke),
         score_to_par = max(stroke) - max(par),
         hole_distance = first(start_distance),
+        good_shot_pct = mean(good_shot, na.rm = TRUE),
+        bad_shot_pct = mean(bad_shot, na.rm = TRUE),
         
         sg_ott = if (all(is.na(selected_handicap[high_level_desc == 'Off the Tee']))) NA_real_
         else sum(selected_handicap[high_level_desc == 'Off the Tee'], na.rm = TRUE),
@@ -488,13 +624,7 @@ server <- function(input, output, session) {
         under_regulation = max(under_regulation),
         fir = max(fir),
         feet_of_putts_made = max(feet_of_putts_made),
-        
-        drive_distance = if (
-          all(is.na(drive_distance)) ||
-          any(penalty != 0, na.rm = TRUE)
-        ) NA_real_
-        else sum(drive_distance, na.rm = TRUE),
-        
+        drive_distance = if (all(is.na(drive_distance)) || any(penalty != 0, na.rm = TRUE)) NA_real_ else sum(drive_distance, na.rm = TRUE),
         hole = first(hole)
       ) %>%
       group_by(round_id) %>%
@@ -619,25 +749,226 @@ server <- function(input, output, session) {
     )
   })
   
-  output$sg_kpi_boxes <- renderUI({
-    kpi_data <- joined_data()
-    if (nrow(kpi_data) == 0) return(NULL)
+  output$kpi_cards <- renderUI({
     
-    kpi_data <- kpi_data %>%
-      filter(!is.na(strokes_gained)) %>%
-      group_by(high_level_desc) %>%
-      summarise(total_sg = round(sum(strokes_gained), 2), .groups = "drop")
+    hld <- hole_level_data()
     
-    if (nrow(kpi_data) == 0) return(NULL)
+    scramble <- hld %>%
+      ungroup() %>%
+      filter(gir == 0) %>%
+      summarise(opportunities = n(), successes = sum(score_to_par <= 0, na.rm = TRUE), rate = successes / opportunities)
+
     
-    kpi_cards <- lapply(1:nrow(kpi_data), function(i) {
-      desc <- kpi_data$high_level_desc[i]
-      value <- kpi_data$total_sg[i]
-      infoBox(title = desc, value = value, icon = icon("golf-ball-tee"), width = 2)
-    })
+    rounds_played <- hld %>% distinct(round_id) %>% nrow()
+    gir_pct <- mean(hld$gir, na.rm = TRUE)
+    fir_pct <- mean(hld$fir, na.rm = TRUE)
+    good_shot_pct <- mean(hld$good_shot_pct, na.rm = TRUE)
+    poor_shot_avoidance <- 1 - mean(hld$bad_shot_pct, na.rm = TRUE)
+    par_or_better_pct <- mean(hld$score_to_par <= 0, na.rm = TRUE)
+    num_eagles <- sum(hld$score_to_par == -2, na.rm = TRUE)
+    avg_drive_dist <- mean(hld$drive_distance, na.rm = TRUE)
     
-    fluidRow(kpi_cards)
+    hole_outs <- sg_composite %>%
+      filter(start_surface != "Green" & !is.na(in_hole)) %>%
+      nrow()
+    
+    longest_hole_out <- sg_composite %>%
+      filter(start_surface != "Green" & !is.na(in_hole)) %>%
+      summarise(longest_hole_out = ifelse(n() == 0, NA_real_, max(start_distance, na.rm = TRUE))) %>%
+      pull(longest_hole_out)
+    
+    best_club <- sg_composite %>%
+      filter(!is.na(club) & club != "penalty") %>%
+      group_by(club) %>%
+      summarise(avg_sg = mean(.data[[sg_col()]], na.rm = TRUE), n = n(), .groups = "drop") %>%
+      filter(n >= 10) %>%   # minimum shot threshold to avoid noise
+      slice_max(avg_sg, n = 1) %>%
+      mutate(label = paste0(toupper(club), " (", round(avg_sg, 2), ")")) %>%
+      pull(label)
+    
+    best_sg_category <- sg_composite %>%
+      filter(high_level_desc != "Recovery") %>%
+      group_by(sg_category_25) %>%
+      summarise(avg_sg = mean(.data[[sg_col()]], na.rm = TRUE), n = n(), .groups = "drop") %>%
+      filter(n >= 10) %>%   # minimum shot threshold to avoid noise
+      slice_max(avg_sg, n = 1) %>%
+      mutate(label = paste0(toupper(sg_category_25), " (", round(avg_sg, 2), ")")) %>%
+      pull(label)
+    
+    
+    # dry this up, course exists upstream already
+    courses_played <- hld %>%
+      ungroup() %>%
+      distinct(round_id) %>%
+      mutate(course = sub(" \\| .*", "", round_id)) %>%
+      distinct(course) %>%
+      nrow()
+    
+    holes_played <- sg_composite %>%
+      distinct(round_id, hole_index) %>%
+      nrow()
+    
+    shots_logged <- sg_composite %>%
+      nrow()
+    
+    longest_putt <- sg_composite %>%
+      filter(start_surface == "Green" & !is.na(in_hole)) %>%
+      summarise(max(start_distance, na.rm = TRUE)) %>%
+      pull()
+    
+    performance_by_par <- hld %>%
+      group_by(par) %>%
+      summarise(avg_score = mean(score, na.rm = TRUE), .groups = "drop")
+    
+    par_3_avg <- performance_by_par %>% filter(par == 3) %>% pull(avg_score) %>% round(2)
+    par_4_avg <- performance_by_par %>% filter(par == 4) %>% pull(avg_score) %>% round(2)
+    par_5_avg <- performance_by_par %>% filter(par == 5) %>% pull(avg_score) %>% round(2)
+    
+    # catch for if someone hasn't logged any data yet
+    fmt_par_avg <- function(x) {
+      ifelse(length(x) == 0 || is.nan(x), "-", as.character(round(x, 2)))
+    }
+    
+    # order holes chronologically across all rounds
+    hole_sequence <- hld %>%
+      ungroup() %>%
+      arrange(date, round_id, hole_index)
+    
+    # run length encoding to find consecutive streaks
+    birdie_rle <- rle(hole_sequence$score_to_par == -1)
+    par_rle     <- rle(hole_sequence$score_to_par == 0)
+    
+    max_consec_birdies <- ifelse(any(birdie_rle$values),max(birdie_rle$lengths[birdie_rle$values]), 0)
+    max_consec_par <- ifelse(any(par_rle$values), max(par_rle$lengths[par_rle$values]), 0)
+    
+    
+    round_scores_18 <- hld %>%
+      group_by(round_id) %>%
+      summarise(
+        holes        = n(),
+        score        = sum(score),
+        score_to_par = sum(score_to_par),
+        .groups = "drop"
+      ) %>%
+      filter(holes == 18)
+    
+    scoring_avg_18   <- ifelse(nrow(round_scores_18) == 0, NA_real_, mean(round_scores_18$score))
+    low_round_18     <- ifelse(nrow(round_scores_18) == 0, NA_real_, min(round_scores_18$score_to_par))
+    low_round_raw_18 <- ifelse(nrow(round_scores_18) == 0, NA_real_, round_scores_18$score[which.min(round_scores_18$score_to_par)])
+    
+    
+    round_scores_9 <- hld %>%
+      group_by(round_id) %>%
+      mutate(nine = ifelse(hole_index <= 9, "Front", "Back")) %>%
+      group_by(round_id, nine) %>%
+      summarise(
+        holes        = n(),
+        score        = sum(score),
+        score_to_par = sum(score_to_par),
+        .groups = "drop"
+      ) %>%
+      filter(holes == 9)
+    
+    low_round_9     <- ifelse(nrow(round_scores_9) == 0, NA_real_, min(round_scores_9$score_to_par))
+    low_round_raw_9 <- ifelse(nrow(round_scores_9) == 0, NA_real_, round_scores_9$score[which.min(round_scores_9$score_to_par)])
+    
+    sg_summary <- hld %>%
+      group_by(round_id) %>%
+      summarise(
+        across(c(sg_ott, sg_app, sg_arg, sg_putt), ~ sum(.x, na.rm = TRUE)),
+        .groups = "drop"
+      ) %>%
+      summarise(across(c(sg_ott, sg_app, sg_arg, sg_putt), ~ mean(.x, na.rm = TRUE)))
+    
+    fluidRow(
+      style = "padding: 0 6px;",
+      infoBox("Rounds Played", as.character(rounds_played), icon = icon("golf-ball-tee"), width = 2),
+      infoBox("Courses Played", as.character(courses_played), icon = icon("location-dot"), width = 2),
+      infoBox("Holes Played", as.character(holes_played), icon = icon("map"), width = 2),
+      infoBox("Shots Logged", as.character(shots_logged), icon = icon("list-ol"), width = 2),
+      infoBox("Scrambling", ifelse(is.nan(scramble$rate), "-", scales::percent(scramble$rate, accuracy = 1)), icon = icon("arrow-down-up-across-line"), width = 2),
+      infoBox("GIR %", ifelse(is.nan(gir_pct), "-", scales::percent(gir_pct, accuracy = 1)), icon = icon("circle-check"), width = 2),
+      infoBox("FIR %", ifelse(is.nan(fir_pct), "-", scales::percent(fir_pct, accuracy = 1)), icon = icon("road"), width = 2),
+      infoBox("Scoring Avg", ifelse(is.na(scoring_avg_18), "-", as.character(round(scoring_avg_18, 1))), icon = icon("hashtag"), width = 2),
+      infoBox("Low 18", ifelse(is.na(low_round_18), "-", paste0(low_round_raw_18, " (", ifelse(low_round_18 <= 0, as.character(low_round_18), paste0("+", low_round_18)), ")")),icon = icon("trophy"), width = 2),
+      infoBox("Low 9", ifelse(is.na(low_round_9), "-", paste0(low_round_raw_9, " (", ifelse(low_round_9 <= 0, as.character(low_round_9), paste0("+", low_round_9)), ")")),icon = icon("trophy"), width = 2),
+      infoBox("SG: OTT", as.character(round(sg_summary$sg_ott,  2)), icon = icon("hammer"), width = 2),
+      infoBox("SG: APP", as.character(round(sg_summary$sg_app,  2)), icon = icon("bullseye"), width = 2),
+      infoBox("SG: ARG", as.character(round(sg_summary$sg_arg,  2)), icon = icon("hand-sparkles"), width = 2),
+      infoBox("SG: PUTT", as.character(round(sg_summary$sg_putt, 2)), icon = icon("flag"), width = 2),
+      infoBox("Good Shot Rate",  ifelse(is.nan(good_shot_pct), "-", scales::percent(good_shot_pct, accuracy = 1)), icon = icon("star"), width = 2),
+      infoBox("Poor Shot Avoidance",  ifelse(is.nan(poor_shot_avoidance), "-", scales::percent(poor_shot_avoidance, accuracy = 1)), icon = icon("poo"), width = 2),
+      infoBox("Par or Better", ifelse(is.nan(par_or_better_pct), "-", scales::percent(par_or_better_pct, accuracy = 1)), icon = icon("thumbs-up"), width = 2),
+      infoBox("Most Consecutive Birdies", as.character(max_consec_birdies), icon = icon("fire"),      width = 2),
+      infoBox("Most Consecutive Pars",    as.character(max_consec_par),     icon = icon("arrow-trend-up"), width = 2),
+      infoBox("Eagles", as.character(num_eagles), icon = icon("dove"), width = 2),
+      infoBox("Driving Distance", ifelse(is.nan(avg_drive_dist), "-", round(avg_drive_dist, 1)), icon = icon("dumbbell"), width = 2),
+      infoBox("Hole Outs", as.character(hole_outs), icon = icon("flag"), width = 2),
+      infoBox("Longest Hole Out", as.character(longest_hole_out), icon = icon("ruler-horizontal"), width = 2), # add ifelse if none?
+      infoBox("Longest Holed Putt", as.character(longest_putt), icon = icon("ruler-horizontal"), width = 2),
+      infoBox("Par 3 Performance", fmt_par_avg(par_3_avg), icon = icon("3"), width = 2),
+      infoBox("Par 4 Performance", fmt_par_avg(par_4_avg), icon = icon("4"), width = 2),
+      infoBox("Par 5 Performance", fmt_par_avg(par_5_avg), icon = icon("5"), width = 2),
+      infoBox("Best Club (SG/shot)", ifelse(length(best_club) == 0, "-", best_club), icon = icon("ranking-star"), width = 2),
+      infoBox("Best SG Category (SG/shot)", ifelse(length(best_sg_category) == 0, "-", best_sg_category), icon = icon("ranking-star"), width = 2)
+      )
   })
+  
+  output$data_dict <- render_gt({
+    
+    tibble(
+      KPI = c(
+        "Rounds Played",
+        "Scrambling",
+        "GIR %",
+        "FIR %",
+        "Scoring Avg",
+        "Low Round",
+        "Good Shot %",
+        "Poor Shot Avoidance %",
+        "Par or Better",
+        "Consec. Birdies",
+        "Consec. Par+",
+        "Eagles",
+        "Avg Drive",
+        "Courses Played",
+        "SG: OTT",
+        "SG: APP",
+        "SG: ARG",
+        "SG: PUTT"
+      ),
+      Definition = c(
+        "Total number of rounds logged in the app",
+        "Percentage of holes where you missed the green in regulation but still made par or better",
+        "Percentage of holes where the ball is on the green in regulation (2 or more shots remaining for par when reaching the green)",
+        "Percentage of par 4 and par 5 tee shots that found the fairway (Par 3's excluded)",
+        "Average 18-hole score",
+        "Lowest 18-hole score",
+        "Fraction of shots that gained at least 0.5 strokes against the selected handicap baseline",
+        "1 minus the fraction of shots that lost at least 0.5 strokes against the selected handicap baseline",
+        "Percentage of holes with a score of par or better",
+        "Longest streak of consecutive birdies",
+        "Longest streak of consecutive pars",
+        "Total number of eagles",
+        "Average driving distance in yards (excluding penalty shots). Disclaimer: this is calculated as hole distance - distance remaining after tee shot in which driver was used. So, take for example a short Par 4 in which you are pin-high after your tee shot, 30 yards left of the pin. It will calculate your drive as hole distance - 30, even though technically your drive distance was the length of the hole, just left.",
+        "Number of unique courses played",
+        "Strokes Gained: Off the Tee. Measures tee shot performance relative to the selected handicap baseline.",
+        "Strokes Gained: Approach. Measures approach shot performance relative to the selected handicap baseline.",
+        "Strokes Gained: Around the Green. Measures short game performance relative to the selected handicap baseline.",
+        "Strokes Gained: Putting. Measures putting performance relative to the selected handicap baseline."
+      )
+    ) %>%
+      gt() %>%
+      tab_header(title = "KPI Definitions") %>%
+      cols_width(KPI ~ px(160), Definition ~ px(600)) %>%
+      tab_style(
+        style = cell_text(weight = "bold"),
+        locations = cells_body(columns = KPI)
+      ) %>%
+      gt_theme_538(quiet = TRUE)
+  })
+  
+  
   
   output$download_csv <- downloadHandler(
     filename = function() paste0("strokes_gained_data_", Sys.Date(), ".csv"),
@@ -645,80 +976,6 @@ server <- function(input, output, session) {
   )
   
   output$scorecards <- render_gt({
-    
-    hole_level_data <- reactive({
-      
-      selected_handicap <- switch(
-        input$handicap_baseline,
-        "pga_exp" = "pga_sg",
-        "scratch_exp" = "scratch_sg",
-        "avg_80_exp" = "avg_80_exp",
-        "avg_85_exp" = "avg_85_exp",
-        "avg_90_exp" = "avg_90_exp",
-        "avg_95_exp" = "avg_95_exp",
-        "avg_100_exp" = "avg_100_exp"
-      )
-      
-      sg_composite %>%
-        mutate(
-          selected_handicap = .data[[selected_handicap]]
-        ) %>%
-        mutate(gir = ifelse(par - stroke >= 2 & finish_surface == "Green", 1, 0)) %>%
-        mutate(under_regulation = ifelse(par - stroke >= 3 & finish_surface == "Green", 1, 0)) %>%
-        mutate(fir = ifelse(par >= 4 & stroke == 1 & finish_surface == 'Fairway', 1,
-                            ifelse(par == 3, NA, 0))) %>%
-        mutate(feet_of_putts_made = ifelse(start_surface == "Green" & !is.na(in_hole), start_distance, 0)) %>%
-        group_by(round_id, date, hole_index, par) %>%
-        summarise(
-          score = max(stroke), 
-          score_to_par = max(stroke) - max(par), 
-          hole_distance = first(start_distance),
-          
-          sg_ott = if (all(is.na(selected_handicap[high_level_desc == 'Off the Tee']))) NA_real_
-          else sum(selected_handicap[high_level_desc == 'Off the Tee'], na.rm = TRUE), 
-          
-          sg_app = if (all(is.na(selected_handicap[high_level_desc == 'Approach']))) NA_real_
-          else sum(selected_handicap[high_level_desc == 'Approach'], na.rm = TRUE), 
-          
-          sg_arg = if (all(is.na(selected_handicap[high_level_desc == 'Around the Green']))) NA_real_
-          else sum(selected_handicap[high_level_desc == 'Around the Green'], na.rm = TRUE), 
-          
-          sg_putt = if (all(is.na(selected_handicap[high_level_desc == 'Putting']))) NA_real_
-          else sum(selected_handicap[high_level_desc == 'Putting'], na.rm = TRUE),
-          
-          gir = max(gir),
-          under_regulation = max(under_regulation),
-          fir = max(fir),
-          feet_of_putts_made = max(feet_of_putts_made),
-          
-          drive_distance = if (
-            all(is.na(drive_distance)) ||
-            any(penalty != 0, na.rm = TRUE)
-          ) NA_real_
-          else sum(drive_distance, na.rm = TRUE),
-          
-          hole = first(hole)
-        ) %>%
-        group_by(round_id) %>%
-        arrange(hole_index, .by_group = TRUE) %>%
-        mutate(
-          hole_index = row_number(),
-          running_score_to_par = cumsum(score_to_par)
-        ) %>%
-        mutate(score_label = case_when(
-          score_to_par ==  0 ~ "Par",
-          score_to_par ==  1 ~ "Bogey",
-          score_to_par ==  2 ~ "Double Bogey",
-          score_to_par ==  3 ~ "Triple Bogey",
-          score_to_par ==  4 ~ "Quadruple Bogey",
-          score_to_par == -1 ~ "Birdie",
-          score_to_par == -2 ~ "Eagle",
-          score_to_par == -3 ~ "Double Eagle",
-          TRUE ~ NA_character_
-        ))
-      
-    })
-    
     
     selected_scorecard <- hole_level_data() %>%
       filter(round_id == input$selected_scorecard)
@@ -891,45 +1148,49 @@ server <- function(input, output, session) {
   })
   
   output$moving_avg <- renderPlotly({
-  
     
     
-    # year ranges
-    year_ranges <- sg_summarised %>%
+    
+    plot_data <- sg_summarised %>%
       filter(high_level_desc == input$strokes_gained_category) %>%
+      mutate(
+        selected_sg = .data[[sg_col()]],
+        moving_avg  = zoo::rollapply(selected_sg, width = 20, FUN = mean, fill = NA, align = "right", partial = TRUE),
+        bar_color   = case_when(
+          high_level_desc == "TOTAL" & !holes %in% c(9, 18) ~ "rgba(100, 195, 220, 0.4)",
+          selected_sg < 0 ~ "rgba(224, 112, 112, 0.4)",
+          TRUE            ~ "rgba(100, 180, 160, 0.4)"
+        )
+      )
+    
+    year_ranges <- plot_data %>%
       group_by(year = format(date, "%Y")) %>%
       summarise(
         start_index = min(round_index),
-        end_index = max(round_index),
-        mid_index = (start_index + end_index) / 2,
-        n_rounds = n(),
+        end_index   = max(round_index),
+        mid_index   = (start_index + end_index) / 2,
+        n_rounds    = n(),
         .groups = "drop"
       )
     
-    
-    # year boundary lines
     year_boundaries <- year_ranges %>%
       arrange(start_index) %>%
       slice(-1) %>%
       mutate(line_pos = start_index - 0.5)
     
-    
-    
-    # year labels
     year_labels <- year_ranges %>%
       filter(n_rounds >= 3)
     
-    
     plot_ly() %>%
       add_bars(
-        data = sg_summarised %>% dplyr::filter(high_level_desc == input$strokes_gained_category),
+        data = plot_data,
         x = ~round_index,
-        y = ~scratch_sg,
+        y = ~selected_sg,
         marker = list(color = ~bar_color),
         hovertemplate = paste(
           "Round: %{customdata}<br>",
           "Date: %{hovertext}<br>",
-          "SG vs Scratch: %{y:.2f}<br>",
+          paste0("SG vs ", sg_col_label(), ": %{y:.2f}<br>"),
           "<extra></extra>"
         ),
         customdata = ~round_id,
@@ -938,17 +1199,17 @@ server <- function(input, output, session) {
         name = "SG per Round"
       ) %>%
       add_text(
-        data = sg_summarised %>% filter(high_level_desc == input$strokes_gained_category),
+        data = plot_data,
         x = ~round_index,
-        y = ~ifelse(scratch_sg >= 0, scratch_sg + 0.1, scratch_sg - 0.1),
+        y = ~ifelse(selected_sg >= 0, selected_sg + 0.1, selected_sg - 0.1),
         text = ~strokes,
-        textposition = ~ifelse(scratch_sg >= 0, "top center", "bottom center"),
+        textposition = ~ifelse(selected_sg >= 0, "top center", "bottom center"),
         textfont = list(size = 9, color = "rgba(80, 80, 80, 0.8)"),
         hoverinfo = "skip",
         showlegend = FALSE
       ) %>%
       add_lines(
-        data = sg_summarised %>% filter(high_level_desc == input$strokes_gained_category),
+        data = plot_data,
         x = ~round_index,
         y = ~moving_avg,
         line = list(color = "black", width = 2),
@@ -978,43 +1239,31 @@ server <- function(input, output, session) {
           )
         }),
         xaxis = list(
-          tickvals = sg_summarised %>% filter(high_level_desc == input$strokes_gained_category) %>% pull(round_index),
-          ticktext = sg_summarised %>% filter(high_level_desc == input$strokes_gained_category) %>% pull(course_name),
+          tickvals  = plot_data$round_index,
+          ticktext  = plot_data$course_name,
           tickangle = -90,
-          title = "",
-          showgrid = FALSE,
-          zeroline = FALSE
+          title     = "",
+          showgrid  = FALSE,
+          zeroline  = FALSE
         ),
         yaxis = list(
-          title = "Strokes Gained vs Scratch",
-          showgrid = TRUE,
+          title     = paste0("Strokes Gained vs ", sg_col_label()),
+          showgrid  = TRUE,
           gridcolor = "rgba(200,200,200,0.4)",
-          zeroline = TRUE,
+          zeroline  = TRUE,
           zerolinecolor = "black",
           zerolinewidth = 1.5
         ),
-        plot_bgcolor = "white",
+        plot_bgcolor  = "white",
         paper_bgcolor = "white",
-        showlegend = FALSE,
-        bargap = 0.2,
-        margin = list(t = 60)
+        showlegend    = FALSE,
+        bargap        = 0.2,
+        margin        = list(t = 60)
       )
-    
   })
   
   
   output$cumulative_sg <- renderPlotly({
-    
-    sg_col <- switch(
-      input$handicap_baseline,
-      "pga_exp"    = "pga_sg",
-      "scratch_exp" = "scratch_sg",
-      "avg_80_exp" = "avg_80_sg",
-      "avg_85_exp" = "avg_85_sg",
-      "avg_90_exp" = "avg_90_sg",
-      "avg_95_exp" = "avg_95_sg",
-      "avg_100_exp" = "avg_100_sg"
-    )
     
     cumulative_total <- sg_composite %>%
       arrange(date, hole, stroke) %>%
@@ -1030,8 +1279,8 @@ server <- function(input, output, session) {
       group_by(high_level_desc) %>%
       arrange(shot_no) %>%
       mutate(
-        shot_sg = round(.data[[sg_col]], 2),
-        cumulative_sg = round(cumsum(replace_na(.data[[sg_col]], 0)), 2)
+        shot_sg = round(.data[[sg_col()]], 2),
+        cumulative_sg = round(cumsum(replace_na(.data[[sg_col()]], 0)), 2)
       )
     
     cumulative <- ggplot(
@@ -1070,6 +1319,169 @@ server <- function(input, output, session) {
     
     ggplotly(cumulative, tooltip = "text")
     
+  })
+  
+  output$sg_by_category <- renderPlot({
+    
+    incremental_25_yds_performance <- sg_composite %>%
+      filter(!grepl("Recovery", sg_category_25, ignore.case = TRUE)) %>%
+      group_by(sg_category_25) %>%
+      summarise(
+        sg_total    = sum(.data[[sg_col()]], na.rm = TRUE),
+        shots       = n(),
+        sg_per_shot = sg_total / shots,
+        .groups = "drop"
+      ) %>%
+      filter(shots > 1) %>%
+      mutate(category_type = case_when(
+        grepl("Approach",    sg_category_25, ignore.case = TRUE) ~ "APP",
+        grepl("Putting",     sg_category_25, ignore.case = TRUE) ~ "PUTT",
+        grepl("Off the Tee", sg_category_25, ignore.case = TRUE) ~ "OTT",
+        grepl("Around",      sg_category_25, ignore.case = TRUE) ~ "ARG",
+        TRUE ~ "Other"
+      )) %>%
+      mutate(
+        category_type  = factor(category_type, levels = c("OTT", "APP", "ARG", "PUTT")),
+        first_num      = as.numeric(str_extract(sg_category_25, "\\d+")),
+        sg_category_25 = factor(sg_category_25, levels = sg_category_25[order(category_type, first_num)])
+      )
+    
+    ggplot(
+      data = incremental_25_yds_performance,
+      aes(
+        x    = sg_category_25,
+        y    = sg_per_shot,
+        fill = sg_per_shot > 0
+      )
+    ) +
+      geom_col() +
+      geom_text(
+        aes(
+          y = ifelse(
+            sg_per_shot >= 0,
+            sg_per_shot + 0.005,
+            sg_per_shot - 0.005
+          ),
+          label = shots
+        ),
+        angle = 90,
+        fontface = "bold",
+        size = 3.5,
+        color = "gray20"
+      ) + 
+      
+      facet_grid(
+        ~ category_type,
+        scales = "free_x",
+        space = "free_x"
+      ) + 
+      
+      scale_fill_manual(
+        values = c(
+          "TRUE" = "#5DCAA5",
+          "FALSE" = "#e07070"
+        ),
+        guide = "none"
+      ) +
+      
+      labs(
+        x     = "",
+        y     = paste0("SG Per Shot vs ", sg_col_label()),
+        title = paste0(
+          "Strokes Gained per Shot (",
+          sg_col_label(),
+          " Baseline)"
+        )
+      ) +
+      
+      theme_minimal() +
+      theme_fivethirtyeight() +
+      theme(
+        axis.text.x   = element_text(angle = 45, hjust = 1, size = 7),
+        strip.text    = element_text(face = "bold"),
+        panel.spacing.x = unit(1.2, "lines")
+      ) 
+  })
+  
+  
+  output$best_and_worst_shots <- render_gt({
+    
+    n <- input$top_bottom_n
+    
+    sg_composite %>%
+      filter(round_id %in% input$top_bottom_round) %>%
+      mutate(
+        sg_val      = .data[[sg_col()]],
+        top_rank    = min_rank(desc(sg_val)),
+        bottom_rank = row_number(sg_val) # break ties. a lot of ties with penalty shots being -1
+      ) %>%
+      mutate(shot_verbiage = case_when(
+          
+        start_surface == "Green" & !is.na(in_hole) ~
+            paste0("Holed ", start_distance, " ft putt"),
+          
+          start_surface != "Green" & !is.na(in_hole) ~
+            paste0("Holed out from ", start_distance, " yards in the ", start_surface),
+        
+          penalty == 1 & start_distance == finish_distance & start_surface == finish_surface ~
+            "Out of Bounds Penalty",
+        
+          penalty == 1 & (start_distance != finish_distance | start_surface != finish_surface) ~
+            "Penalty Drop",
+        
+          start_surface == "Green" & finish_surface == "Green" & is.na(in_hole) ~
+            paste0("Missed putt from ", start_distance, " ft to ", finish_distance, " ft"),
+          
+          start_surface == "Tee" & finish_surface != "Green" ~
+            paste0("Teeshot with ", club, " from ", start_distance, " yards to ", finish_distance, " yards", " in the ", finish_surface),
+          
+          start_surface == "Tee" & finish_surface == "Green" ~
+            paste0("Teeshot with ", club, " from ", start_distance, " yards to ", finish_distance, " ft"),
+      
+          finish_surface == "Green" & start_surface != "Green" ~
+            paste0(club, " from ", start_distance, " yards in the ", start_surface, " to ", finish_distance, " ft"),
+
+          start_surface != "Green" & finish_surface != "Green" ~
+            paste0(club, " from ", start_distance, " yards in the ", start_surface, " to ", finish_distance, " yards", " in the ", finish_surface),
+          
+        TRUE ~ "TBD"
+        )
+      ) %>%
+      filter(top_rank <= n | bottom_rank <= n) %>%
+      mutate(
+        shot_type  = case_when(
+          top_rank    <= n ~ paste0("Top ", n),
+          bottom_rank <= n ~ paste0("Bottom ", n)
+        ),
+        shot_order = ifelse(shot_type == paste0("Top ", n), 1, 2),
+        sort_sg    = case_when(
+          shot_type == paste0("Top ", n)    ~ -sg_val,
+          shot_type == paste0("Bottom ", n) ~  sg_val
+        )
+      ) %>%
+      arrange(shot_order, sort_sg) %>%
+      select(round_id, shot_type, hole, par, stroke, club, start, finish, sg_val, shot_verbiage) %>%
+      gt(groupname_col = "shot_type") %>%
+      fmt_number(columns = sg_val, decimals = 2) %>%
+      cols_label(
+        round_id = "Round",
+        hole     = "Hole",
+        par      = "Par",
+        stroke   = "Stroke",
+        club     = "Club",
+        start    = "Start",
+        finish   = "Finish",
+        sg_val   = "SG"
+      ) %>%
+      data_color(
+        columns = sg_val,
+        fn = scales::col_numeric(
+          palette = c("#d73027", "#fdae61", "#ffffbf", "#a6d96a", "#1a9850"),
+          domain  = NULL
+        )
+      ) %>%
+      tab_header(title = paste0("Best & Worst Shots")) %>%
+      gt_theme_538(quiet = TRUE)
   })
   
   
