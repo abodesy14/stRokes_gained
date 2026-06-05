@@ -26,8 +26,8 @@
   library(zoo)
   library(tidyr)
   library(ggthemes)
+  library(httr2)
 }
-
 
 
 ####################
@@ -64,78 +64,150 @@ xStrokes_tall <- xStrokes_filled %>%
 ### READ IN SHOT DATA + DATA CLEANING ###
 # avoid hardcoding before committing
 # but if this is local exploration it's fine
-setwd("/Users/adambeaudet/Github/stRokes_gained/data/shot_tracking")
 
-# old format of logging strokes before using shiny app directly
-# palmetto dunes 14 has the same hole index twice somehow
-shot_history_old <- read_excel("/Users/adambeaudet/Github/stRokes_gained/data/shot_tracking/shot_tracking_file.xlsx", sheet = "rounds") %>%
-  select(date:finish) %>%
-  select(-hole_orientation) %>%
-  rename(in_hole = finish) %>%
-  mutate(src = "Old") %>%
-  group_by(date, course) %>%
-  mutate(
-    is_tee_shot = grepl("t$", start),
-    prev_in_hole = lag(in_hole, default = NA),
-    starts_new_hole = is_tee_shot & (!is.na(prev_in_hole) | row_number() == 1),
-    hole_index = cumsum(starts_new_hole)
-  ) %>%
-  ungroup() %>%
-  select(-is_tee_shot, -prev_in_hole, -starts_new_hole)
+SUPABASE_URL <- Sys.getenv("SUPABASE_URL")
+SUPABASE_KEY <- Sys.getenv("SUPABASE_KEY")
 
-
-round_file_paths <- list.files(
-  "/Users/adambeaudet/Github/stRokes_gained/data/shot_tracking", 
-  pattern = "\\.csv$",
-  full.names = TRUE
-)
-
-# need like a dim course that stores city, state, logo, etc.
-
-# hole index more-so important than physical hole. physical hole would be good for best/worst holes if same course played a lot
-shot_history_new <- map_dfr(round_file_paths, function(path) {
-  df <- read.csv(path)
+read_rounds <- function() {
   
-  fname <- basename(path) |> str_remove("\\.csv$")
-  date <- str_extract(fname, "\\d{4}-\\d{2}-\\d{2}")
-  course <- str_remove(fname, "_\\d{4}-\\d{2}-\\d{2}$")
+  all_rows <- list()
+  offset <- 0
+  limit <- 1000
   
-  df %>%
-    mutate(course = course, date = as.Date(date)) %>%
-    rename(start = shot_code_yds) %>%
-    select(-c(strokes_gained, high_level_desc)) %>%
-    arrange(course, date) %>%
+  repeat {
+    resp <- request(SUPABASE_URL) %>%
+      req_url_path_append("rest/v1/rounds") %>%
+      req_headers(
+        "apikey"        = SUPABASE_KEY,
+        "Authorization" = paste("Bearer", SUPABASE_KEY)
+      ) %>%
+      req_url_query(
+        select = "*",
+        order  = "date.asc,round_shot_number.asc",
+        limit  = limit,
+        offset = offset
+      ) %>%
+      req_perform() %>%
+      resp_body_json(simplifyVector = TRUE)
+    
+    if (length(resp) == 0) break
+    all_rows <- append(all_rows, list(as_tibble(resp)))
+    if (nrow(as_tibble(resp)) < limit) break
+    offset <- offset + limit
+  }
+  
+  if (length(all_rows) == 0) return(tibble())
+  
+  bind_rows(all_rows) %>%
+    transmute(
+      date       = as.Date(date),
+      course     = course,
+      hole       = as.integer(hole),
+      par        = as.integer(par),
+      stroke     = as.integer(round_shot_number),
+      club       = club,
+      start      = shot_code_yds,
+      in_hole    = na_if(as.character(in_hole), "")
+    ) %>%
+    arrange(date, course, stroke) %>%
     group_by(course, date) %>%
     mutate(
-      prev_in_hole = lag(in_hole, default = NA),
-      is_tee_shot = grepl("t$", start),
+      is_tee_shot     = grepl("t$", start),
+      prev_in_hole    = lag(in_hole, default = NA),
       starts_new_hole = is_tee_shot & (!is.na(prev_in_hole) | row_number() == 1),
-      hole_index = cumsum(starts_new_hole)
+      hole_index      = cumsum(starts_new_hole)
     ) %>%
     group_by(course, date, hole_index) %>%
-    mutate(
-      stroke = row_number()
-    ) %>%
+    mutate(stroke = row_number()) %>%
     ungroup() %>%
-    select(-c(is_tee_shot, prev_in_hole, starts_new_hole)) %>%
-    mutate(src = "New") %>%
-    mutate(across(where(is.character), ~na_if(., ""))) %>%
-    filter(!is.na(start)) %>%
-    # for ordering before rbind
-    select(date, course, hole, par, stroke, club, start, in_hole, src, hole_index)
-})
+    select(-is_tee_shot, -prev_in_hole, -starts_new_hole)
+}
 
-# combine two formats into one data frame
-shot_history_all <- bind_rows(shot_history_old, shot_history_new)
+shot_history_all <- read_rounds()
 
-shot_history_all <- shot_history_all %>%
+write_round <- function(course_name, round_date, df) {
+  
+  course_slug <- tolower(str_replace_all(course_name, " ", "_"))
+  round_id_str <- paste0(course_name, " | ", round_date)
+  
+  payload <- df %>%
+    filter(!is.na(shot_code_yds) & shot_code_yds != "") %>%
+    mutate(
+      user_id       = "adambeaudet",
+      round_id      = round_id_str,
+      date          = as.character(round_date),
+      course        = course_slug,
+      shot_number   = row_number()
+    ) %>%
+    select(user_id, round_id, date, course, shot_number, shot_code_yds, hole, par, club, in_hole) %>%
+    purrr::transpose()
+  
+  request(SUPABASE_URL) %>%
+    req_url_path_append("rest/v1/rounds") %>%
+    req_headers(
+      "apikey"        = SUPABASE_KEY,
+      "Authorization" = paste("Bearer", SUPABASE_KEY),
+      "Content-Type"  = "application/json",
+      "Prefer"        = "return=minimal"
+    ) %>%
+    req_body_json(payload) %>%
+    req_method("POST") %>%
+    req_perform()
+}
+
+
+
+update_round <- function(df) {
+  df %>%
+    filter(!is.na(id) & !is.na(shot_code_yds) & shot_code_yds != "") %>%
+    rowwise() %>%
+    group_walk(~ {
+      
+      hole_val    <- .x[["hole"]]
+      par_val     <- .x[["par"]]
+      club_val    <- .x[["club"]]
+      in_hole_val <- .x[["in_hole"]]
+      
+      payload <- list(
+        shot_code_yds = .x[["shot_code_yds"]],
+        hole          = if (length(hole_val) == 0 || is.na(hole_val) || hole_val == "NA") NULL else as.integer(hole_val),
+        par           = if (length(par_val)  == 0 || is.na(par_val)  || par_val  == "NA") NULL else as.integer(par_val),
+        club          = if (length(club_val) == 0 || is.na(club_val)) NULL else club_val,
+        in_hole       = if (length(in_hole_val) == 0 || is.na(in_hole_val) || in_hole_val == "" || in_hole_val == "NA") NULL else in_hole_val
+      )
+      
+      resp <- request(SUPABASE_URL) %>%
+        req_url_path_append("rest/v1/rounds") %>%
+        req_headers(
+          "apikey"        = SUPABASE_KEY,
+          "Authorization" = paste("Bearer", SUPABASE_KEY),
+          "Content-Type"  = "application/json",
+          "Prefer"        = "return=minimal"
+        ) %>%
+        req_url_query(id = paste0("eq.", .x[["id"]])) %>%
+        req_body_json(payload) %>%
+        req_method("PATCH") %>%
+        req_error(is_error = \(r) FALSE) %>%
+        req_perform()
+      
+      if (resp_status(resp) >= 400) {
+        message("Failed on id ", .x[["id"]], ": ", resp_body_string(resp))
+      }
+    })
+}
+
+
+# how to make dt less jittery when entering
+
+  
+shot_history_all <- read_rounds() %>%
   mutate(course_clean = str_to_title(str_replace_all(course, '_', ' '))) %>%
   relocate(course_clean, .after = course) %>%
   mutate(round_id = paste0(course_clean, " | ", date)) %>%
   relocate(round_id, .after = course_clean) %>%
   mutate(finish = ifelse(is.na(in_hole), lead(start), in_hole)) %>%
-  fill(hole) %>% 
-  fill(par) %>% 
+  fill(hole) %>%
+  fill(par) %>%
   mutate(start_surface = ifelse(grepl('f', start), 'Fairway',
                                 ifelse(grepl('g', start), 'Green',
                                        ifelse(grepl('t', start), 'Tee',
@@ -156,6 +228,9 @@ shot_history_all <- shot_history_all %>%
   ungroup() %>%
   select(-c(start_surface)) %>%
   mutate(penalty = if_else(lead(club) == "penalty" | club == "penalty", 1, 0))
+
+sg_composite <- left_join(shot_history_all, xStrokes_filled, by = c("start" = "shot_code_yds"))
+sg_composite <- left_join(sg_composite, dim_sg_cat, by = c("start" = "shot_code_yds"))
 # coalesce in_hole. 0 and 1
 
 
@@ -241,7 +316,6 @@ ui <- fluidPage(
   
   theme = shinythemes::shinytheme("flatly"),
   
-  # JS for enter key
   tags$script(HTML("
     $(document).on('keydown', '.dataTable input', function(e) {
       if (e.key === 'Enter') {
@@ -251,79 +325,25 @@ ui <- fluidPage(
   ")),
   
   tags$style(HTML("
-
-/* the whole card */
-.info-box {
-  min-height: 50px;      /* how tall the card is */
-  margin-bottom: 10px;   /* space between rows of cards */
-  border: 1px solid #e0e0e0;  /* border: thickness, style, color */
-  border-radius: 8px;    /* rounds the corners. 0 = sharp, higher = more rounded */
-  box-shadow: none;      /* removes the default shadow shinydashboard adds */
-}
-
-/* the colored icon square on the left */
-.info-box-icon {
-  height: 50px;          /* should match min-height above */
-  line-height: 50px;     /* vertically centers the icon. should match height */
-  width: 70px;           /* how wide the icon area is */
-  font-size: 28px;       /* size of the icon itself */
-}
-
-/* the text area on the right of the icon */
-.info-box-content {
-
-  /* added: stack label + value vertically */
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-
-  padding-top: 4px;      /* space above the text */
-  padding-bottom: 4px;   /* space below the text */
-}
-
-/* the big number in the middle */
-.info-box-number {
-  font-size: 22px;
-  line-height: 1.1;      /* added */
-}
-
-/* the title text at the top */
-.info-box-text {
-  font-size: 13px;
-  line-height: 1.1;      /* added */
-  margin-bottom: 2px;    /* added */
-
-  /* added: allows long labels to wrap */
-  white-space: normal;
-}
-
-")),
+.info-box { min-height: 50px; margin-bottom: 10px; border: 1px solid #e0e0e0; border-radius: 8px; box-shadow: none; }
+.info-box-icon { height: 50px; line-height: 50px; width: 70px; font-size: 28px; }
+.info-box-content { display: flex; flex-direction: column; justify-content: center; padding-top: 4px; padding-bottom: 4px; }
+.info-box-number { font-size: 22px; line-height: 1.1; }
+.info-box-text { font-size: 13px; line-height: 1.1; margin-bottom: 2px; white-space: normal; }
+  ")),
   
-  
-  # global handicap selection
   fluidRow(
     column(
       width = 12,
-      
       div(
-        style = "
-          background-color: #f8f9fa;
-          padding: 12px 18px;
-          border-radius: 10px;
-          margin-bottom: 15px;
-        ",
-        
+        style = "background-color: #f8f9fa; padding: 12px 18px; border-radius: 10px; margin-bottom: 15px;",
         radioButtons(
           "handicap_baseline",
           "Choose Handicap Baseline:",
           choices = c(
-            "PGA" = "pga_exp",
-            "Scratch" = "scratch_exp",
-            "80" = "avg_80_exp",
-            "85" = "avg_85_exp",
-            "90" = "avg_90_exp",
-            "95" = "avg_95_exp",
-            "100" = "avg_100_exp"
+            "PGA" = "pga_exp", "Scratch" = "scratch_exp",
+            "80" = "avg_80_exp", "85" = "avg_85_exp",
+            "90" = "avg_90_exp", "95" = "avg_95_exp", "100" = "avg_100_exp"
           ),
           selected = "scratch_exp",
           inline = TRUE
@@ -332,84 +352,42 @@ ui <- fluidPage(
     )
   ),
   
-  
-  # tabs
   tabsetPanel(
     
-    # round/data entry
     tabPanel(
       "Round Entry",
-      
       br(),
-      
       fluidRow(
-        
         column(
           width = 4,
-          
           fluidRow(
-            
-            column(
-              width = 4,
-              numericInput(
-                "num_rows",
-                "Shots to Add:",
-                value = 36,
-                min = 1
-              )
-            ),
-            
-            column(
-              width = 4,
-              style = "padding-top: 25px;",
-              actionButton(
-                "add_rows",
-                "Add Shots",
-                style = "width: 100%;"
-              )
-            ),
-            
-            column(
-              width = 4,
-              style = "padding-top: 25px;",
-              downloadButton(
-                "download_csv",
-                "Download",
-                style = "width: 100%;"
-              )
-            )
+            column(width = 6, textInput("course_name", "Course Name:", placeholder = "e.g. Palmetto Dunes")),
+            column(width = 6, dateInput("round_date", "Round Date:", value = Sys.Date()))
+          ),
+          fluidRow(
+            column(width = 3, numericInput("num_rows", "Shots:", value = 36, min = 1)),
+            column(width = 3, style = "padding-top: 25px;", actionButton("add_rows", "Add", style = "width: 100%;")),
+            column(width = 3, style = "padding-top: 25px;", actionButton("save_round", "Save", style = "width: 100%; background-color: #2ecc71; color: white; border: none;")),
+            column(width = 3, style = "padding-top: 25px;", downloadButton("download_csv", "CSV", style = "width: 100%;"))
           )
         ),
-        
-        column(
-          width = 8,
-          uiOutput("sg_kpi_boxes")
-        )
+        column(width = 8, uiOutput("sg_kpi_boxes"))
       ),
-      
-      
       fluidRow(
-        
         column(
           width = 4,
-          
           tags$div(
-            
             tags$hr(),
-            
             tags$p(tags$b("App Usage:")),
-            
             tags$p(
               "Enter in the starting location of each of your shots in the ",
               tags$b("Shot Start"),
               " column. If you holed out on a shot, indicate this by entering in any value into the ",
               tags$b("Ball in Hole"),
               " column, otherwise, leave it blank.",
-              tags$br(),
-              tags$br(),
+              tags$br(), tags$br(),
               "Double click a cell to modify, and click 'Enter' or 'Tab' to submit a shot. The format for 'Shot Start' is yardage followed by a code:"
             ),
-            
             tags$ul(
               tags$li("'t' = tee"),
               tags$li("'f' = fairway"),
@@ -419,84 +397,79 @@ ui <- fluidPage(
               tags$li("'rec' = recovery"),
               tags$li("'g' = green")
             ),
-            
-            tags$p(
-              "For example, 400t would be entered if teeing off on a 400 yard hole, 150f for a shot from 150 yards in fairway, and 30g for a 30 foot putt on the green."
-            )
+            tags$p("For example, 400t would be entered if teeing off on a 400 yard hole, 150f for a shot from 150 yards in fairway, and 30g for a 30 foot putt on the green.")
           )
         ),
-        
-        
-        column(
-          width = 8,
-          DTOutput("sg_table")
-        )
+        column(width = 8, DTOutput("sg_table"))
       )
     ),
     
-    
-    # scorecards
     tabPanel(
-      "Scorecards",
-      
+      "Edit Round",
       br(),
-      
       fluidRow(
         column(
-          width = 12,
-          
+          width = 4,
           selectInput(
-            "selected_scorecard",
-            "Select Round",
+            "edit_round_select",
+            "Select Round to Edit",
             choices = sg_composite %>%
               distinct(round_id, date) %>%
               arrange(desc(date)) %>%
               pull(round_id)
+          )
+        ),
+        column(
+          width = 2,
+          style = "padding-top: 25px;",
+          actionButton(
+            "save_edits",
+            "Save Changes",
+            style = "width: 100%; background-color: #e67e22; color: white; border: none;"
+          )
+        )
+      ),
+      fluidRow(
+        column(
+          width = 12,
+          DTOutput("edit_round_table")
+        )
+      )
+    ),
+    
+    tabPanel(
+      "Scorecards",
+      br(),
+      fluidRow(
+        column(
+          width = 12,
+          selectInput(
+            "selected_scorecard", "Select Round",
+            choices = sg_composite %>% distinct(round_id, date) %>% arrange(desc(date)) %>% pull(round_id)
           ),
-          
           gt_output("scorecards")
         )
       )
     ),
     
-    
-    # strokes gained breakout by category
     tabPanel(
       "SG Breakout",
-      
       br(),
-      
       gt_output("sg_breakout")
     ),
     
-    
-    # moving averages
     tabPanel(
       "Moving Avg",
-      
       br(),
-      
       selectInput(
-        inputId = "strokes_gained_category",
-        label = "SG Category",
-        choices = c(
-          "TOTAL",
-          "Off the Tee",
-          "Approach",
-          "Around the Green",
-          "Putting"
-        ),
+        inputId = "strokes_gained_category", label = "SG Category",
+        choices = c("TOTAL", "Off the Tee", "Approach", "Around the Green", "Putting"),
         selected = "TOTAL"
       ),
-      
       plotlyOutput("moving_avg")
     ),
     
-    # cumulative strokes gained by category
-    tabPanel(
-      "Cumulative",
-      plotlyOutput("cumulative_sg")
-    ),
+    tabPanel("Cumulative", plotlyOutput("cumulative_sg")),
     
     tabPanel(
       "SG by Category",
@@ -511,50 +484,25 @@ ui <- fluidPage(
         column(
           width = 8,
           selectInput(
-            "top_bottom_round",
-            "Select Round(s)",
-            choices = sg_composite %>%
-              distinct(round_id, date) %>%
-              arrange(desc(date)) %>%
-              pull(round_id),
+            "top_bottom_round", "Select Round(s)",
+            choices = sg_composite %>% distinct(round_id, date) %>% arrange(desc(date)) %>% pull(round_id),
             multiple = TRUE,
-            selected = sg_composite %>%
-              distinct(round_id, date) %>%
-              arrange(desc(date)) %>%
-              slice(1) %>%
-              pull(round_id)
+            selected = sg_composite %>% distinct(round_id, date) %>% arrange(desc(date)) %>% slice(1) %>% pull(round_id)
           )
         ),
-        column(
-          width = 2,
-          numericInput(
-            "top_bottom_n",
-            "Top / Bottom N:",
-            value = 5,
-            min = 1,
-            max = 20
-          )
-        )
+        column(width = 2, numericInput("top_bottom_n", "Top / Bottom N:", value = 5, min = 1, max = 20))
       ),
       gt_output("best_and_worst_shots")
     ),
-    tabPanel(
-      "KPIs",
-      br(),
-      uiOutput("kpi_cards")
-      ),
     
-    tabPanel(
-      "Data Dictionary",
-      br(),
-      gt_output("data_dict")
-    ),
+    tabPanel("KPIs", br(), uiOutput("kpi_cards")),
     
-    tabPanel(
-      "FAQ"
-    )
+    tabPanel("Data Dictionary", br(), gt_output("data_dict")),
+    
+    tabPanel("FAQ")
   )
 )
+
 
 # server
 server <- function(input, output, session) {
@@ -624,7 +572,14 @@ server <- function(input, output, session) {
         under_regulation = max(under_regulation),
         fir = max(fir),
         feet_of_putts_made = max(feet_of_putts_made),
-        drive_distance = if (all(is.na(drive_distance)) || any(penalty != 0, na.rm = TRUE)) NA_real_ else sum(drive_distance, na.rm = TRUE),
+        drive_distance = {
+          first_shot_dist <- drive_distance[stroke == 1]
+          if (all(is.na(first_shot_dist)) || any(penalty != 0, na.rm = TRUE)) NA_real_
+          else {
+            d <- first(na.omit(first_shot_dist))
+            if (is.na(d) || d < 50) NA_real_ else d
+          }
+        },
         hole = first(hole)
       ) %>%
       group_by(round_id) %>%
@@ -767,6 +722,7 @@ server <- function(input, output, session) {
     par_or_better_pct <- mean(hld$score_to_par <= 0, na.rm = TRUE)
     num_eagles <- sum(hld$score_to_par == -2, na.rm = TRUE)
     avg_drive_dist <- mean(hld$drive_distance, na.rm = TRUE)
+    longest_drive <- max(hld$drive_distance, na.rm = TRUE)
     
     hole_outs <- sg_composite %>%
       filter(start_surface != "Green" & !is.na(in_hole)) %>%
@@ -903,6 +859,7 @@ server <- function(input, output, session) {
       infoBox("Most Consecutive Pars",    as.character(max_consec_par),     icon = icon("arrow-trend-up"), width = 2),
       infoBox("Eagles", as.character(num_eagles), icon = icon("dove"), width = 2),
       infoBox("Driving Distance", ifelse(is.nan(avg_drive_dist), "-", round(avg_drive_dist, 1)), icon = icon("dumbbell"), width = 2),
+      infoBox("Longest Drive", ifelse(is.nan(longest_drive), "-", round(longest_drive, 1)), icon = icon("weight-hanging"), width = 2),
       infoBox("Hole Outs", as.character(hole_outs), icon = icon("flag"), width = 2),
       infoBox("Longest Hole Out", as.character(longest_hole_out), icon = icon("ruler-horizontal"), width = 2), # add ifelse if none?
       infoBox("Longest Holed Putt", as.character(longest_putt), icon = icon("ruler-horizontal"), width = 2),
@@ -974,6 +931,115 @@ server <- function(input, output, session) {
     filename = function() paste0("strokes_gained_data_", Sys.Date(), ".csv"),
     content = function(file) write.csv(joined_data(), file, row.names = FALSE)
   )
+  
+  observeEvent(input$save_round, {
+    req(nchar(trimws(input$course_name)) > 0)
+    
+    df <- joined_data()
+    
+    if (nrow(df %>% filter(!is.na(shot_code_yds) & shot_code_yds != "")) == 0) {
+      showNotification("No shots to save.", type = "warning")
+      return()
+    }
+    
+    tryCatch({
+      write_round(
+        course_name = trimws(input$course_name),
+        round_date  = input$round_date,
+        df          = df
+      )
+      showNotification(
+        paste0(trimws(input$course_name), " | ", input$round_date, " saved successfully."),
+        type = "message",
+        duration = 5
+      )
+    }, error = function(e) {
+      showNotification(paste("Save failed:", e$message), type = "error", duration = 8)
+    })
+  })
+  
+  # load selected round into edit table
+  edit_table_data <- reactive({
+    req(input$edit_round_select)
+    
+    # read raw from supabase to get id column
+    all_rows <- list()
+    offset <- 0
+    limit <- 1000
+    
+    repeat {
+      resp <- request(SUPABASE_URL) %>%
+        req_url_path_append("rest/v1/rounds") %>%
+        req_headers(
+          "apikey"        = SUPABASE_KEY,
+          "Authorization" = paste("Bearer", SUPABASE_KEY)
+        ) %>%
+        req_url_query(
+          select   = "*",
+          round_id = paste0("eq.", input$edit_round_select),
+          order    = "round_shot_number.asc",
+          limit    = limit,
+          offset   = offset
+        ) %>%
+        req_perform() %>%
+        resp_body_json(simplifyVector = TRUE)
+      
+      if (length(resp) == 0) break
+      all_rows <- append(all_rows, list(as_tibble(resp)))
+      if (nrow(as_tibble(resp)) < limit) break
+      offset <- offset + limit
+    }
+    
+    if (length(all_rows) == 0) return(tibble())
+    
+    bind_rows(all_rows) %>%
+      transmute(
+        id            = as.character(id),
+        shot_code_yds = as.character(shot_code_yds),
+        hole          = as.character(hole),
+        par           = as.character(par),
+        club          = as.character(club),
+        in_hole       = as.character(in_hole)
+      )
+  })
+  
+  edit_table_state <- reactiveVal(NULL)
+  
+  observeEvent(edit_table_data(), {
+    edit_table_state(edit_table_data())
+  })
+  
+  output$edit_round_table <- renderDT({
+    req(edit_table_state())
+    edit_table_state() %>%
+      select(-id) %>%
+      datatable(
+        editable  = list(target = "cell"),
+        colnames  = c("Shot Code", "Hole", "Par", "Club", "In Hole"),
+        rownames  = FALSE,
+        options   = list(paging = FALSE, dom = "t",
+                         columnDefs = list(list(className = "dt-center", targets = 0:4)))
+      )
+  })
+  
+  observeEvent(input$edit_round_table_cell_edit, {
+    info <- input$edit_round_table_cell_edit
+    df   <- edit_table_state()
+    df[info$row, info$col + 2] <- DT::coerceValue(info$value, df[[info$col + 2]][info$row])
+    edit_table_state(df)
+  })
+  
+  observeEvent(input$save_edits, {
+    df <- edit_table_state()
+    req(nrow(df) > 0)
+    
+    tryCatch({
+      update_round(df)
+      showNotification("Changes saved successfully.", type = "message", duration = 5)
+    }, error = function(e) {
+      showNotification(paste("Save failed:", e$message), type = "error", duration = 8)
+    })
+  })
   
   output$scorecards <- render_gt({
     
