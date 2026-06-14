@@ -38,6 +38,14 @@
 # get supabase creds
 if (file.exists("secrets.R")) source("secrets.R")
 
+SUPABASE_URL <- Sys.getenv("SUPABASE_URL")
+SUPABASE_KEY <- Sys.getenv("SUPABASE_KEY")
+
+if (SUPABASE_URL == "" || SUPABASE_KEY == "") {
+  stop("Supabase creds not loaded.")
+}
+
+
 ### EXPECTED STROKES DATASET #### 
 xStrokes <- read.csv("data/expected_strokes/expected_strokes_dataset.csv") %>%
   select(-c(hdcp_4_exp:hdcp_20_exp))
@@ -112,9 +120,9 @@ read_rounds <- function(user_id = NULL) {
     arrange(date, course, stroke) %>%
     group_by(course, date) %>%
     mutate(is_tee_shot = grepl("t$", start),
-      prev_in_hole = lag(in_hole, default = NA),
-      starts_new_hole = is_tee_shot & (!is.na(prev_in_hole) | row_number() == 1),
-      hole_index = cumsum(starts_new_hole)) %>%
+           prev_in_hole = lag(in_hole, default = NA),
+           starts_new_hole = is_tee_shot & (!is.na(prev_in_hole) | row_number() == 1),
+           hole_index = cumsum(starts_new_hole)) %>%
     group_by(course, date, hole_index) %>%
     mutate(stroke = row_number()) %>%
     ungroup() %>%
@@ -381,8 +389,8 @@ login_ui <- function(message = NULL) {
             "Create a free account to track rounds, view analytics, and monitor your game over time."
           ),
           if (!is.null(message)) div(style = "color: red; margin-bottom: 10px; text-align: center;", message),
-          textInput("login_username", "Username"),
-          passwordInput("login_password", "Password"),
+          textInput("login_username", "Username", width = "100%"),
+          passwordInput("login_password", "Password", width = "100%"),
           br(),
           actionButton("do_login", "Login", style = "width: 100%; background-color: #2ecc71; color: white; border: none;"),
           br(), br(),
@@ -614,14 +622,23 @@ server <- function(input, output, session) {
       # logout/account bar
       fluidRow(
         column(
-          width = 6,
+          width = 3,
           div(
             style = "padding: 5px 15px;",
             span(style = "color: gray; font-size: 13px; font-weight: bold;", "stRokes Gained")
           )
         ),
         column(
-          width = 6,
+          width = 2,
+          div(
+            style = "text-align: center; padding: 5px 15px;",
+            tags$a(href = "https://github.com/abodesy14/stRokes_gained", target = "_blank",
+                   style = "color: gray; font-size: 12px;",
+                   icon("github"), " View GitHub")
+          )
+        ),
+        column(
+          width = 7,
           div(
             style = "text-align: right; padding: 5px 15px;",
             if (logged_in) {
@@ -704,6 +721,7 @@ server <- function(input, output, session) {
                 tags$b("Shot Code and Ball in Hole are the only required fields to calculate strokes gained."), " Club, Hole, and Par are optional but provide additional analytics. For Hole and Par, only enter them on the first shot of each hole as they fill down automatically")
               )
             ),
+            uiOutput("table_error_msg"),
             column(width = 8, DTOutput("sg_table"))
           )
         ),
@@ -720,6 +738,9 @@ server <- function(input, output, session) {
         if (logged_in) tabPanel("Scorecards", br(),
                                 fluidRow(column(width = 12, uiOutput("scorecard_select"), gt_output("scorecards")))
         ),
+        
+        if (logged_in) tabPanel("KPIs", br(), uiOutput("kpi_cards")),
+        
         
         if (logged_in) tabPanel("SG by Round", br(), gt_output("sg_breakout")),
         
@@ -740,9 +761,7 @@ server <- function(input, output, session) {
                                 ),
                                 gt_output("best_and_worst_shots")
         ),
-        
-        if (logged_in) tabPanel("KPIs", br(), uiOutput("kpi_cards")),
-        
+      
         if (logged_in) tabPanel("Data Dictionary", br(), gt_output("data_dict")),
         
         if (logged_in) tabPanel("Change Password", br(),
@@ -756,11 +775,6 @@ server <- function(input, output, session) {
                                                                  style = "width: 100%; background-color: #2ecc71; color: white; border: none;")
                                                 )
                                 ))
-        ),
-        
-        tabPanel(
-          "FAQ",
-          br(),
         )
       )
     )
@@ -906,7 +920,7 @@ server <- function(input, output, session) {
         is_holed = !is.na(in_hole) & in_hole != "",
         strokes_gained = round(ifelse(is_holed, baseline - 1, baseline - lead(baseline, order_by = row_number()) - 1), 2)
       ) %>%
-      select(shot_code_yds, hole, par, club, in_hole, strokes_gained, high_level_desc)
+      select(shot_code_yds, hole, par, club, in_hole, strokes_gained, high_level_desc, baseline)
   })
   
   
@@ -916,24 +930,37 @@ server <- function(input, output, session) {
   
   output$sg_table <- renderDT({
     table_rendered(TRUE)
-    joined_data() %>%
-      select(shot_code_yds, hole, par, club, in_hole, strokes_gained) %>%
-      datatable(
-        editable = list(target = "cell", disable = list(columns = c(6))),
-        colnames = c(
-          'Shot Start' = 'shot_code_yds',
-          'Hole' = 'hole',
-          'Par' = 'par',
-          'Club' = 'club',
-          'Ball in Hole' = 'in_hole',
-          'Strokes Gained' = 'strokes_gained'
-        ),
-        options = list(
-          paging = FALSE,
-          dom = 't',
-          columnDefs = list(list(className = 'dt-center', targets = 1:6))
-        ),
-        class = 'cell-border'
+    df <- joined_data() %>%
+      mutate(invalid = !is.na(shot_code_yds) & shot_code_yds != "" & is.na(baseline)) %>%
+      select(shot_code_yds, hole, par, club, in_hole, strokes_gained, invalid, baseline)
+    
+    datatable(
+      df,
+      editable = list(target = "cell", disable = list(columns = c(6, 7))),
+      colnames = c(
+        'Shot Start' = 'shot_code_yds',
+        'Hole' = 'hole',
+        'Par' = 'par',
+        'Club' = 'club',
+        'Ball in Hole' = 'in_hole',
+        'Strokes Gained' = 'strokes_gained',
+        'invalid' = 'invalid'
+      ),
+      options = list(
+        paging = FALSE,
+        dom = 't',
+        columnDefs = list(
+          list(className = 'dt-center', targets = 1:6),
+          list(visible = FALSE, targets = 7),
+          list(visible = FALSE, targets = 8)
+        )
+      ),
+      class = 'cell-border'
+    ) %>%
+      formatStyle(
+        'invalid',
+        target = 'row',
+        backgroundColor = styleEqual(TRUE, 'rgba(255, 0, 0, 0.5)') # color row red if user entry won't join to any rows in expected strokes df
       ) %>%
       formatStyle(
         'Strokes Gained',
@@ -955,9 +982,24 @@ server <- function(input, output, session) {
     req(table_rendered())
     replaceData(
       proxy,
-      joined_data() %>% select(shot_code_yds, hole, par, club, in_hole, strokes_gained),
+      joined_data() %>%
+        mutate(invalid = !is.na(shot_code_yds) & shot_code_yds != "" & is.na(baseline)) %>%
+        select(shot_code_yds, hole, par, club, in_hole, strokes_gained, invalid, baseline),
       resetPaging = FALSE,
       rownames = FALSE
+    )
+  })
+  
+  output$table_error_msg <- renderUI({
+    df <- joined_data()
+    invalid_rows <- which(!is.na(df$shot_code_yds) & df$shot_code_yds != "" & is.na(df$baseline))
+    
+    if (length(invalid_rows) == 0) return(NULL)
+    
+    div(
+      style = "color: #c0392b; font-size: 13px; margin-bottom: 8px;",
+      icon("triangle-exclamation"),
+      paste0("Invalid shot code(s) in row(s): ", paste(invalid_rows, collapse = ", "), ". Please fix before saving/continuing entry.")
     )
   })
   
@@ -976,8 +1018,9 @@ server <- function(input, output, session) {
     fir_pct <- mean(hld$fir, na.rm = TRUE)
     good_shot_pct <- mean(hld$good_shot_pct, na.rm = TRUE)
     poor_shot_avoidance <- 1 - mean(hld$bad_shot_pct, na.rm = TRUE)
-    par_or_better_pct <- mean(hld$score_to_par <= 0, na.rm = TRUE)
+    # par_or_better_pct <- mean(hld$score_to_par <= 0, na.rm = TRUE)
     num_eagles <- sum(hld$score_to_par == -2, na.rm = TRUE)
+    num_birdies <- sum(hld$score_to_par == -1, na.rm = TRUE)
     avg_drive_dist <- mean(hld$drive_distance, na.rm = TRUE)
     longest_drive <- if (all(is.na(hld$drive_distance))) "-" else round(max(hld$drive_distance, na.rm = TRUE), 1)
     
@@ -1008,7 +1051,48 @@ server <- function(input, output, session) {
       mutate(label = paste0(toupper(sg_category_25), " (", round(avg_sg, 2), ")")) %>%
       pull(label)
     
-
+    
+    # proximity kpis
+    # to match pga tour calc, filter to shots from the fairway and shots that finished closer to the hole than where you started
+    # basically filters out penalty and very bad shots
+    prox_data <- shot_data() %>%
+      filter(!is.na(finish_footage) & start_surface == "Fairway" & finish_footage < start_distance * 3) %>%
+      group_by(sg_category_25) %>%
+      summarise(avg_prox = round(mean(finish_footage, na.rm = TRUE), 1), n = n(), .groups = "drop")
+    
+    get_prox <- function(category) {
+      val <- prox_data %>% filter(sg_category_25 == category & n >= 10) %>% pull(avg_prox)
+      ifelse(length(val) == 0, "-", paste0(val, " ft"))
+    }
+    
+    est_handicap <- shot_data() %>%
+      group_by(round_id) %>%
+      summarise(round_scratch_sg = sum(scratch_sg, na.rm = TRUE), date = first(date), .groups = "drop") %>%
+      # slice_max(order_by = date, n = 20) %>%
+      summarise(avg = mean(round_scratch_sg)) %>%
+      pull(avg) %>%
+      round(1)
+    
+    est_handicap_label <- case_when(
+      is.na(est_handicap) ~ "-",
+      est_handicap > 0    ~ paste0("+", est_handicap), # format for plus handicap
+      TRUE ~ as.character(abs(est_handicap))
+    )
+    
+    # score distribution
+    pct_birdie_or_better <- mean(hld$score_to_par <= -1, na.rm = TRUE)
+    pct_par <- mean(hld$score_to_par == 0,  na.rm = TRUE)
+    pct_bogey <- mean(hld$score_to_par == 1,  na.rm = TRUE)
+    pct_double_or_worse <- mean(hld$score_to_par >= 2,  na.rm = TRUE)
+    
+    # 3-putt rate
+    three_putt_data <- shot_data() %>%
+      mutate(is_putt = tolower(club) %in% c("p", "putter")) %>%
+      group_by(round_id, hole_index) %>%
+      summarise(putts = sum(is_putt), .groups = "drop")
+    
+    three_putt_rate <- mean(three_putt_data$putts >= 3, na.rm = TRUE)
+    
     
     # could dry this up
     courses_played <- hld %>%
@@ -1100,32 +1184,51 @@ server <- function(input, output, session) {
       infoBox("Courses Played", as.character(courses_played), icon = icon("location-dot"), width = 2),
       infoBox("Holes Played", as.character(holes_played), icon = icon("map"), width = 2),
       infoBox("Shots Logged", as.character(shots_logged), icon = icon("list-ol"), width = 2),
-      infoBox("Scrambling", ifelse(is.nan(scramble$rate), "-", scales::percent(scramble$rate, accuracy = 1)), icon = icon("arrow-down-up-across-line"), width = 2),
+      infoBox("Est. Handicap", est_handicap_label, icon = icon("star"), width = 2),
+      infoBox("Scoring Avg", ifelse(is.na(scoring_avg_18), "-", as.character(round(scoring_avg_18, 1))), icon = icon("hashtag"), width = 2),
+      
       infoBox("GIR %", ifelse(is.nan(gir_pct), "-", scales::percent(gir_pct, accuracy = 1)), icon = icon("circle-check"), width = 2),
       infoBox("FIR %", ifelse(is.nan(fir_pct), "-", scales::percent(fir_pct, accuracy = 1)), icon = icon("road"), width = 2),
-      infoBox("Scoring Avg", ifelse(is.na(scoring_avg_18), "-", as.character(round(scoring_avg_18, 1))), icon = icon("hashtag"), width = 2),
-      infoBox("Low 18", ifelse(is.na(low_round_18), "-", paste0(low_round_raw_18, " (", ifelse(low_round_18 <= 0, as.character(low_round_18), paste0("+", low_round_18)), ")")),icon = icon("trophy"), width = 2),
-      infoBox("Low 9", ifelse(is.na(low_round_9), "-", paste0(low_round_raw_9, " (", ifelse(low_round_9 <= 0, as.character(low_round_9), paste0("+", low_round_9)), ")")),icon = icon("trophy"), width = 2),
-      infoBox("SG: OTT", as.character(round(sg_summary$sg_ott, 2)), icon = icon("hammer"), width = 2),
-      infoBox("SG: APP", as.character(round(sg_summary$sg_app, 2)), icon = icon("bullseye"), width = 2),
-      infoBox("SG: ARG", as.character(round(sg_summary$sg_arg, 2)), icon = icon("hand-sparkles"), width = 2),
-      infoBox("SG: PUTT", as.character(round(sg_summary$sg_putt, 2)), icon = icon("flag"), width = 2),
+      infoBox("Scrambling", ifelse(is.nan(scramble$rate), "-", scales::percent(scramble$rate, accuracy = 1)), icon = icon("arrow-down-up-across-line"), width = 2),
       infoBox("Good Shot Rate",  ifelse(is.nan(good_shot_pct), "-", scales::percent(good_shot_pct, accuracy = 1)), icon = icon("star"), width = 2),
       infoBox("Poor Shot Avoidance",  ifelse(is.nan(poor_shot_avoidance), "-", scales::percent(poor_shot_avoidance, accuracy = 1)), icon = icon("poo"), width = 2),
-      infoBox("Par or Better", ifelse(is.nan(par_or_better_pct), "-", scales::percent(par_or_better_pct, accuracy = 1)), icon = icon("thumbs-up"), width = 2),
-      infoBox("Most Consecutive Birdies", as.character(max_consec_birdies), icon = icon("fire"),      width = 2),
-      infoBox("Most Consecutive Pars", as.character(max_consec_par), icon = icon("arrow-trend-up"), width = 2),
-      infoBox("Eagles", as.character(num_eagles), icon = icon("dove"), width = 2),
       infoBox("Driving Distance", ifelse(is.nan(avg_drive_dist), "-", round(avg_drive_dist, 1)), icon = icon("dumbbell"), width = 2),
-      infoBox("Longest Drive", as.character(longest_drive), icon = icon("weight-hanging"), width = 2),
-      infoBox("Hole Outs", as.character(hole_outs), icon = icon("flag"), width = 2),
-      infoBox("Longest Hole Out", as.character(longest_hole_out), icon = icon("ruler-horizontal"), width = 2),
-      infoBox("Longest Holed Putt", as.character(longest_putt), icon = icon("ruler-horizontal"), width = 2),
+      
+      infoBox("SG OTT / round", as.character(round(sg_summary$sg_ott, 2)), icon = icon("hammer"), width = 2),
+      infoBox("SG APP / round", as.character(round(sg_summary$sg_app, 2)), icon = icon("crosshairs"), width = 2),
+      infoBox("SG ARG / round", as.character(round(sg_summary$sg_arg, 2)), icon = icon("hands"), width = 2),
+      infoBox("SG PUTT / round", as.character(round(sg_summary$sg_putt, 2)), icon = icon("flag"), width = 2),
+      infoBox("Best Club (SG/shot)", ifelse(length(best_club) == 0, "-", best_club), icon = icon("ranking-star"), width = 2),
+      infoBox("Best SG Category (SG/shot)", ifelse(length(best_sg_category) == 0, "-", best_sg_category), icon = icon("ranking-star"), width = 2),
+      
       infoBox("Par 3 Performance", fmt_par_avg(par_3_avg), icon = icon("3"), width = 2),
       infoBox("Par 4 Performance", fmt_par_avg(par_4_avg), icon = icon("4"), width = 2),
       infoBox("Par 5 Performance", fmt_par_avg(par_5_avg), icon = icon("5"), width = 2),
-      infoBox("Best Club (SG/shot)", ifelse(length(best_club) == 0, "-", best_club), icon = icon("crosshairs"), width = 2),
-      infoBox("Best SG Category (SG/shot)", ifelse(length(best_sg_category) == 0, "-", best_sg_category), icon = icon("ranking-star"), width = 2)
+      infoBox("Longest Hole Out", as.character(longest_hole_out), icon = icon("binoculars"), width = 2),
+      infoBox("Longest Holed Putt", as.character(longest_putt), icon = icon("ruler-horizontal"), width = 2),
+      infoBox("Longest Drive", as.character(longest_drive), icon = icon("weight-hanging"), width = 2),
+      
+      infoBox("Birdie or Better %", ifelse(is.nan(pct_birdie_or_better), "-", scales::percent(pct_birdie_or_better, accuracy = 1)), icon = icon("crow"), width = 2),
+      infoBox("Par %", ifelse(is.nan(pct_par), "-", scales::percent(pct_par, accuracy = 1)), icon = icon("equals"), width = 2),
+      infoBox("Bogey %", ifelse(is.nan(pct_bogey), "-", scales::percent(pct_bogey, accuracy = 1)), icon = icon("circle-minus"),  width = 2),
+      infoBox("Double Bogey+ %", ifelse(is.nan(pct_double_or_worse), "-", scales::percent(pct_double_or_worse,  accuracy = 1)), icon = icon("circle-xmark"), width = 2),
+      infoBox("3-Putt %", ifelse(is.nan(three_putt_rate), "-", scales::percent(three_putt_rate, accuracy = 1)), icon = icon("person-walking"), width = 2),
+      infoBox("Hole Outs", as.character(hole_outs), icon = icon("flag"), width = 2),
+      
+      
+      infoBox("Low 18", ifelse(is.na(low_round_18), "-", paste0(low_round_raw_18, " (", ifelse(low_round_18 <= 0, as.character(low_round_18), paste0("+", low_round_18)), ")")),icon = icon("trophy"), width = 2),
+      infoBox("Low 9", ifelse(is.na(low_round_9), "-", paste0(low_round_raw_9, " (", ifelse(low_round_9 <= 0, as.character(low_round_9), paste0("+", low_round_9)), ")")),icon = icon("9"), width = 2),
+      infoBox("Birdies", as.character(num_birdies), icon = icon("crow"), width = 2),
+      infoBox("Eagles", as.character(num_eagles), icon = icon("dove"), width = 2),
+      infoBox("Most Consecutive Birdies", as.character(max_consec_birdies), icon = icon("fire"), width = 2),
+      infoBox("Most Consecutive Pars", as.character(max_consec_par), icon = icon("arrow-trend-up"), width = 2),
+     
+      infoBox("51-75 yd Proximity", get_prox("Approach 51-75"), icon = icon("bullseye"), width = 2),
+      infoBox("76-100 yd Proximity", get_prox("Approach 76-100"), icon = icon("bullseye"), width = 2),
+      infoBox("101-125 yd Proximity", get_prox("Approach 101-125"), icon = icon("bullseye"), width = 2),
+      infoBox("126-150 yd Proximity", get_prox("Approach 126-150"), icon = icon("bullseye"), width = 2),
+      infoBox("151-175 yd Proximity", get_prox("Approach 151-175"), icon = icon("bullseye"), width = 2),
+      infoBox("176-200 yd Proximity", get_prox("Approach 176-200"), icon = icon("bullseye"), width = 2)
       )
   })
   
@@ -1135,63 +1238,95 @@ server <- function(input, output, session) {
         "Rounds Played",
         "Courses Played",
         "Holes Played",
-        "Scrambling",
+        "Shots Logged",
+        "Est. Handicap",
+        "Scoring Avg",
+
         "GIR %",
         "FIR %",
-        "Scoring Avg",
-        "Low 18",
-        "Low 9",
+        "Scrambling",
+        "Good Shot %",
+        "Poor Shot Avoidance %",
+        "Driving Distance",
+
         "SG: OTT",
         "SG: APP",
         "SG: ARG",
         "SG: PUTT",
-        "Good Shot %",
-        "Poor Shot Avoidance %",
-        "Par or Better",
-        "Consecutive Birdies",
-        "Consecutive Pars",
-        "Eagles",
-        "Driving Distance",
-        "Longest Drive",
-        "Hole Outs",
-        "Longest Hole Out",
-        "Longest Holed Putt",
+        "Best Club (SG/shot)",
+        "Best SG Category (SG/shot)",
+
         "Par 3 Performance",
         "Par 4 Performance",
         "Par 5 Performance",
-        "Best Club (SG/shot)",
-        "Best SG Category (SG/shot)"
+        "Longest Hole Out",
+        "Longest Holed Putt",
+        "Longest Drive",
+
+        "Birdie or Better %",
+        "Par %",
+        "Bogey %",
+        "Double Bogey+ %",
+        "3-Putt %",
+        "Hole Outs",
+ 
+        "Low 18",
+        "Low 9",
+        "Birdies",
+        "Eagles",
+        "Most Consecutive Birdies",
+        "Most Consecutive Pars",
+
+        "51-75 yd Proximity",
+        "76-100 yd Proximity",
+        "101-125 yd Proximity",
+        "126-150 yd Proximity",
+        "151-175 yd Proximity",
+        "176-200 yd Proximity"
       ),
       Definition = c(
         "Total number of rounds logged in the app",
         "Distinct courses played",
         "Number of holes logged",
-        "Percentage of holes missing the green in regulation but still made par or better",
-        "Percentage of holes reaching the green in par-2 strokes.",
-        "Percentage of tee shots hitting the fairway (Par 3's excluded)",
+        "Total number of shots logged across all rounds",
+        "Estimated handicap index based on average strokes gained per round vs a scratch baseline.",
         "Average 18-hole score",
-        "Lowest 18-hole score",
-        "Lowest 9-hole score",
+        "Percentage of holes reaching the green in par-2 strokes",
+        "Percentage of tee shots hitting the fairway (Par 3's excluded)",
+        "Percentage of holes missing the green in regulation but still making par or better",
+        "Fraction of shots that gained at least 0.5 strokes against the selected handicap baseline",
+        "1 minus the fraction of shots that lost at least 0.5 strokes against the selected handicap baseline",
+        "Average driving distance in yards, excluding penalty shots. Calculated as hole length minus the distance remaining after a tee shot hit with driver. This may underestimate distance in some cases such as short Par 4's.",
         "Strokes Gained: Off the Tee. Measures tee shot performance relative to the selected handicap baseline.",
         "Strokes Gained: Approach. Measures approach shot performance relative to the selected handicap baseline.",
         "Strokes Gained: Around the Green. Measures short game performance relative to the selected handicap baseline.",
         "Strokes Gained: Putting. Measures putting performance relative to the selected handicap baseline.",
-        "Fraction of shots that gained at least 0.5 strokes against the selected handicap baseline",
-        "1 minus the fraction of shots that lost at least 0.5 strokes against the selected handicap baseline",
-        "Percentage of holes with a score of par or better",
-        "Longest streak of consecutive birdies",
-        "Longest streak of consecutive pars",
-        "Total number of eagles",
-        "Average driving distance in yards, excluding penalty shots. Calculated as hole length minus the distance remaining after a tee shot hit with driver. This may underestimate distance in some cases such as short Par 4's.",
-        "Longest drive recorded",
-        "Number of hole outs from off the green",
-        "Longest hole out from off the green",
-        "Longest holed putt in feet",
+        "Club gaining the most strokes per shot attempt (min 10 shots)",
+        "Category gaining the most strokes per shot attempt (min 10 shots)",
         "Average strokes taken to hole out on Par 3's",
         "Average strokes taken to hole out on Par 4's",
         "Average strokes taken to hole out on Par 5's",
-        "Club gaining the most strokes per shot attempt (min 10 shots)",
-        "Category gaining the most strokes per shot attempt (min 10 shots)"
+        "Longest hole out from off the green",
+        "Longest holed putt in feet",
+        "Longest drive recorded",
+        "Percentage of holes scored birdie or better",
+        "Percentage of holes scored exactly par",
+        "Percentage of holes scored exactly one over par",
+        "Percentage of holes scored two or more over par",
+        "Percentage of holes 3 putted",
+        "Number of hole outs from off the green",
+        "Lowest 18-hole score",
+        "Lowest 9-hole score",
+        "Total number of birdies",
+        "Total number of eagles",
+        "Longest streak of consecutive birdies",
+        "Longest streak of consecutive pars",
+        "The average distance (in feet) the ball comes to rest from the hole on approach shots from 51-75 yards originating from fairway",
+        "The average distance (in feet) the ball comes to rest from the hole on approach shots from 76-100 yards originating from fairway",
+        "The average distance (in feet) the ball comes to rest from the hole on approach shots from 101-125 yards originating from fairway",
+        "The average distance (in feet) the ball comes to rest from the hole on approach shots from 126-150 yards originating from fairway",
+        "The average distance (in feet) the ball comes to rest from the hole on approach shots from 151-175 yards originating from fairway",
+        "The average distance (in feet) the ball comes to rest from the hole on approach shots from 176-200 yards originating from fairway"
       )
     ) %>%
       gt() %>%
@@ -1719,6 +1854,7 @@ server <- function(input, output, session) {
         alpha = 0) +
       facet_wrap(vars(high_level_desc), scales = "free") +
       geom_hline(yintercept = 0, color = "gray50") +
+      labs(x = "Shot Number", y = "Cumulative Strokes Gained") + 
       theme(legend.position = "none")
     
     ggplotly(cumulative, tooltip = "text")
@@ -1821,30 +1957,6 @@ server <- function(input, output, session) {
       tab_header(title = paste0("Best & Worst Shots")) %>%
       gt_theme_538(quiet = TRUE)
   })
-  
-  output$FAQ <- render_gt({
-    tibble(
-      Question = c(
-        "Why Strokes Gained? I'd rather just keep track of GIR, FIR, and putts",
-        "How do I log hitting into a hazard or OB?",
-        "Will forced layup holes hurt my SG OTT?"
-      ),
-      Answer = c(
-        "Strokes gained adds context around each shot you hit. There is more correlation with strokes gained measuring the strengths and weaknesses of someone's game than there is with counting stats like GIR, FIR, and putts. Just because I pull out a 9i on every hole to try to boost FIR stats does not mean my driving got better / will lead to better scores.",
-        "OB example on a 350 yard hole: Shot 1 = 350t, Shot 2 = 350t (penalty), Shot 3 = 350t (re-tee shot). Lateral hazard example: Shot 1 = 350t, Shot 2 = 350t, Shot 3 = 100r (drop location). Always enter 'penalty' as the club on the penalty stroke.",
-        ""
-      )
-    ) %>%
-      gt() %>%
-      tab_header(title = "FAQ") %>%
-      cols_width(Question ~ px(200), Answer ~ px(600)) %>%
-      tab_style(
-        style = cell_text(weight = "bold"),
-        locations = cells_body(columns = Question)
-      ) %>%
-      gt_theme_538(quiet = TRUE)
-  })
-
   
 }
 
