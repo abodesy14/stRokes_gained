@@ -339,7 +339,7 @@ build_sg_composite <- function(user_id = NULL) {
     ) %>%
     ungroup() %>%
     mutate(
-      club = if_else(club == "Driver", "d", club),
+      club = if_else(tolower(club) == "driver", "d", club),
       club = tolower(club),
       drive_distance = ifelse(club == "d", as.numeric(start_distance) - as.numeric(finish_distance), NA_real_),
       pga_sg = round(as.numeric(pga_sg), 2),
@@ -445,6 +445,16 @@ server <- function(input, output, session) {
   current_user <- reactiveVal(NULL)
   auth_message <- reactiveVal(NULL)
   shot_data <- reactiveVal(NULL)
+  
+  empty_state_ui <- function(msg = "Save a round to the app to view this tab.") {
+    div(
+      style = "text-align: center; color: gray; padding: 60px 20px; font-size: 15px;",
+      icon("golf-ball-tee", style = "font-size: 40px; margin-bottom: 12px; display: block;"),
+      msg
+    )
+  }
+  
+  no_rounds <- function() is.null(shot_data()) || nrow(shot_data()) == 0
   
   
   sg_col <- reactive({
@@ -634,7 +644,7 @@ server <- function(input, output, session) {
             style = "text-align: center; padding: 5px 15px;",
             tags$a(href = "https://github.com/abodesy14/stRokes_gained", target = "_blank",
                    style = "color: gray; font-size: 12px;",
-                   icon("github"), " View GitHub")
+                   icon("github"), " View Project on GitHub")
           )
         ),
         column(
@@ -789,6 +799,7 @@ server <- function(input, output, session) {
   })
   
   output$scorecard_select <- renderUI({
+    if (no_rounds()) return(NULL)
     selectInput(
       "selected_scorecard",
       "Select Round",
@@ -797,6 +808,7 @@ server <- function(input, output, session) {
   })
   
   output$top_bottom_select <- renderUI({
+    if (no_rounds()) return(NULL)
     choices <- round_choices()
     selectInput(
       "top_bottom_round",
@@ -808,6 +820,7 @@ server <- function(input, output, session) {
   })
   
   output$edit_round_select_ui <- renderUI({
+    if (no_rounds()) return(NULL)
     selectInput(
       "edit_round_select",
       "Select Round to Edit",
@@ -1004,6 +1017,7 @@ server <- function(input, output, session) {
   })
   
   output$kpi_cards <- renderUI({
+    if (no_rounds()) return(empty_state_ui())
     
     hld <- hole_level_data()
     
@@ -1037,9 +1051,9 @@ server <- function(input, output, session) {
       filter(!is.na(club) & club != "penalty") %>%
       group_by(club) %>%
       summarise(avg_sg = mean(.data[[sg_col()]], na.rm = TRUE), n = n(), .groups = "drop") %>%
-      filter(n >= 10) %>% 
+      filter(n >= 10) %>%
       slice_max(avg_sg, n = 1) %>%
-      mutate(label = paste0(toupper(club), " (", round(avg_sg, 2), ")")) %>%
+      mutate(label = paste0(tolower(club), " (", round(avg_sg, 2), ")")) %>%
       pull(label)
     
     best_sg_category <- shot_data() %>%
@@ -1216,8 +1230,8 @@ server <- function(input, output, session) {
       infoBox("Hole Outs", as.character(hole_outs), icon = icon("flag"), width = 2),
       
       
-      infoBox("Low 18", ifelse(is.na(low_round_18), "-", paste0(low_round_raw_18, " (", ifelse(low_round_18 <= 0, as.character(low_round_18), paste0("+", low_round_18)), ")")),icon = icon("trophy"), width = 2),
-      infoBox("Low 9", ifelse(is.na(low_round_9), "-", paste0(low_round_raw_9, " (", ifelse(low_round_9 <= 0, as.character(low_round_9), paste0("+", low_round_9)), ")")),icon = icon("9"), width = 2),
+      infoBox("Lowest 18", ifelse(is.na(low_round_18), "-", paste0(low_round_raw_18, " (", ifelse(low_round_18 <= 0, as.character(low_round_18), paste0("+", low_round_18)), ")")),icon = icon("trophy"), width = 2),
+      infoBox("Lowest 9", ifelse(is.na(low_round_9), "-", paste0(low_round_raw_9, " (", ifelse(low_round_9 <= 0, as.character(low_round_9), paste0("+", low_round_9)), ")")),icon = icon("9"), width = 2),
       infoBox("Birdies", as.character(num_birdies), icon = icon("crow"), width = 2),
       infoBox("Eagles", as.character(num_eagles), icon = icon("dove"), width = 2),
       infoBox("Most Consecutive Birdies", as.character(max_consec_birdies), icon = icon("fire"), width = 2),
@@ -1270,8 +1284,8 @@ server <- function(input, output, session) {
         "3-Putt %",
         "Hole Outs",
  
-        "Low 18",
-        "Low 9",
+        "Lowest 18",
+        "Lowest 9",
         "Birdies",
         "Eagles",
         "Most Consecutive Birdies",
@@ -1447,6 +1461,7 @@ server <- function(input, output, session) {
   })
   
   output$edit_round_table <- renderDT({
+    if (no_rounds()) return(datatable(data.frame(Message = "Save a round to the app to edit it here."), options = list(dom = 't'), rownames = FALSE))
     req(edit_table_state())
     edit_table_state() %>%
       select(-id) %>%
@@ -1532,6 +1547,8 @@ server <- function(input, output, session) {
   })
   
   output$scorecards <- render_gt({
+    if (no_rounds()) return(gt(tibble(` ` = "Save a round to the app to view scorecards.")))
+    req(input$selected_scorecard)
     req(input$selected_scorecard)
     
     selected_scorecard <- hole_level_data() %>%
@@ -1656,6 +1673,8 @@ server <- function(input, output, session) {
   })
   
   output$sg_breakout <- render_gt({
+    if (no_rounds()) return(gt(tibble(` ` = "Save a round to the app to view SG by Round.")))
+    
     
     sg_round_summary <- hole_level_data() %>%
       group_by(round_id, date) %>%
@@ -1705,6 +1724,8 @@ server <- function(input, output, session) {
   })
   
   output$moving_avg <- renderPlotly({
+    if (no_rounds()) return(plotly_empty() %>% layout(title = "Save a round to the app to view this chart."))
+    
     
     plot_data <- sg_summarised_data() %>%
       filter(high_level_desc == input$strokes_gained_category) %>%
@@ -1819,6 +1840,7 @@ server <- function(input, output, session) {
   
   
   output$cumulative_sg <- renderPlotly({
+    if (no_rounds()) return(plotly_empty() %>% layout(title = "Save a round to the app to view this chart."))
     
     cumulative_total <- shot_data() %>%
       arrange(date, hole, stroke) %>%
@@ -1862,6 +1884,12 @@ server <- function(input, output, session) {
   })
   
   output$sg_by_category <- renderPlot({
+    if (no_rounds()) {
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5, label = "Save a round to the app to view this chart.",
+                 color = "gray", size = 5) +
+        theme_void()
+    } else {
     
     incremental_25_yds_performance <- shot_data() %>%
       filter(!grepl("Recovery", sg_category_25, ignore.case = TRUE)) %>%
@@ -1902,10 +1930,13 @@ server <- function(input, output, session) {
         panel.spacing.x = unit(2.5, "lines")
       ) +
       geom_hline(yintercept = 0)
+    }
   })
   
   
   output$best_and_worst_shots <- render_gt({
+    if (no_rounds()) return(gt(tibble(` ` = "Save a round to the app to view best and worst shots.")))
+    
     req(input$top_bottom_round)
     
     n <- input$top_bottom_n
