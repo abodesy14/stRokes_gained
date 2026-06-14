@@ -3,3 +3,6 @@ data/shot_tracking
 data/proximity
 .DS_Store
 .Rhistory
+insert_into_db.txt
+secrets.R
+reset_password.R
