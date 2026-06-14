@@ -72,7 +72,7 @@ If you plan on entering in multiple rounds or want to get a more complete view o
 - <strong>SG by Round: </strong> Table that breaks out Strokes Gained OTT, APP, ARG, PUTT for each round. The percentile of each value is also shown.
 <img width="2906" height="464" alt="image" src="https://github.com/user-attachments/assets/fa5b8bf8-4316-42c0-8d7c-ce1123beeee4" /> <br>
 
-- <strong>Moving Avg: </strong>Chart inspired by datagolf https://datagolf.com/player-profiles. Shows the moving average for any of the 4 Strokes Gained categories, or Totals. Green bars represent positive Strokes Gained for that round. Red bars represent negative Strokes Gained for that round. Blue is for rounds that aren't 9 or 18 hole rounds. <img width="2906" height="660" alt="image" src="https://github.com/user-attachments/assets/af28df90-6548-4cc3-8d39-7b7c5901f3a7" /> <br>
+- <strong>Moving Avg: </strong>Chart inspired by datagolf https://datagolf.com/player-profiles. Shows the moving average for any of the 4 Strokes Gained categories, or Totals. Green bars represent positive Strokes Gained for that round. Red bars represent negative Strokes Gained for that round. Blue is for rounds that aren't 9 or 18 hole rounds. <img width="2948" height="1244" alt="image" src="https://github.com/user-attachments/assets/52965fb8-0640-49a2-8dc0-743a67f14932" /> <br>
 
 - <strong>Cumulative: </strong>Facet grid of cumulative line charts for each Strokes Gained category.
 <img width="2970" height="1014" alt="image" src="https://github.com/user-attachments/assets/89452934-7c46-46e9-95cc-b3ea5ebca279" /> <br>
